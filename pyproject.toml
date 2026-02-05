@@ -1,0 +1,13 @@
+[project]
+name = "load-test-suite"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "braintrust>=0.5.3",
+    "faker>=40.1.2",
+    "locust>=2.43.2",
+    "python-dotenv>=1.2.1",
+    "pyyaml>=6.0.3",
+]

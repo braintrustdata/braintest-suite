@@ -1,0 +1,20 @@
+braintrust:
+  project_name: load-testing-project
+  api_url: https://api.braintrust.dev
+
+loadtest:
+  run: true
+  locustfile_path: ./src/locustfile.py
+  params:
+    peak_concurrency: 100 # Number of users at peak load
+    ramp_up: 1 # new users spawned per second
+    run_time: 20s #e.g. 20s, 3m, 2h, 1h20m, 3h30m10s, etc.
+    wait_time:  #amount of time to wait between simulating a new request from a user (a value is chosen at random bw the bounds)
+      min: 1 
+      max: 5
+    
+
+evaltest:
+  run: true
+  dataset_size: 100 # Number of rows in dataset
+  

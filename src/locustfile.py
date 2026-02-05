@@ -2,19 +2,34 @@ from locust import HttpUser, task, between
 import requests
 import os
 import random
+import yaml
 from mock_default_task import mock_answer_question
+from dotenv import load_dotenv
+
+
+load_dotenv()
+def load_config():
+    with open("./braintest.yaml", "r") as f:
+        config = yaml.safe_load(f)
+    return config
+
+config = load_config()
+print(config)
 
 class BraintrustUser(HttpUser):
-
-    wait_time = between(1, 5)
+    min_wait = config["loadtest"]["params"]["wait_time"]["min"]
+    max_wait = config["loadtest"]["params"]["wait_time"]["max"]
+    wait_time = between(min_wait, max_wait)
 
     def on_start(self):
-        requests.Session = lambda: self.client
+        requests.Session = lambda: self.client # Monkey patch request.Session to locust client's. BT SDK uses requests under the hood
         from braintrust import init_logger
 
+        project = config["braintrust"]["project_name"]
         logger = init_logger(
-            project=os.getenv("BRAINTRUST_PROJECT_NAME") or "load-testing-project",
+            project=project,
             async_flush=False,
+            api_key=os.getenv("BRAINTRUST_API_KEY")
         )
         self.logger = logger
 

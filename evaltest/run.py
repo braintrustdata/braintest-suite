@@ -21,6 +21,29 @@ def load_config() -> dict:
 config = load_config()
 
 
+def create_project() -> str:
+    api_url = config["braintrust"]["api_url"]
+    payload = {
+        "name": f"{config["evaltest"].get("name")}-project",
+        "description": "Project for testing a large eval"
+    }
+    headers = {
+        "Authorization": f"Bearer {os.getenv("BRAINTRUST_API_KEY")}",
+        "Content-Type": "application/json",
+    }
+    
+    try:
+        response = http_client(
+            "post", url=f"{api_url}/v1/project", payload=payload, headers=headers
+        )
+        print(f"Project {response.json().get("name")} created successfully")
+    except Exception as e:
+        print(f"Fatal error while creating project: {e}")
+        exit(1)
+
+    return response.json()
+
+
 def initialize_dataset() -> dict:
     print("Creating dataset")
     print("=" * 50)
@@ -42,10 +65,9 @@ def initialize_dataset() -> dict:
             "post", url=f"{api_url}/v1/dataset", payload=payload, headers=headers
         )
     except Exception as e:
-        print(f"Fatal error: {e}")
+        print(f"Fatal error while creating dataset: {e}")
         exit(1)
 
-    print(response.json())
     return response.json()
 
 
@@ -97,15 +119,25 @@ def mock_task(input: dict) -> dict:
         "summary": fake.paragraph(nb_sentences=random.randint(1, 3)),
     }
 
+
 def summary_levenshtein(input, output: dict, expected: dict):
     scorer = Levenshtein()
     return scorer.eval(output=output.get("summary"), expected=expected.get("summary"))
 
+
 def sentiment_exact_match(input, output: dict, expected: dict):
     scorer = ExactMatch()
-    return scorer.eval(output=output.get("sentiment"), expected=expected.get("sentiment"))
+    return scorer.eval(
+        output=output.get("sentiment"), expected=expected.get("sentiment")
+    )
+
 
 def run():
+
+    if config["evaltest"].get("project_id") == None:
+        print("No project provided, one will be created")
+        project_details = create_project()
+        config["evaltest"]["project_id"] = project_details["id"]
 
     dataset = initialize_dataset()
 
@@ -126,20 +158,15 @@ def run():
 
     # Execute eval on this dataset
     print(f"Executing an eval on this dataset")
-    print("="*50)
+    print("=" * 50)
     Eval(
         f"{config["evaltest"]["name"]}-eval",
         project_id=config["evaltest"]["project_id"],
-        data=init_dataset(
-            project_id=dataset["project_id"],
-            name=dataset["name"]
-        ),
+        data=init_dataset(project_id=dataset["project_id"], name=dataset["name"]),
         task=mock_task,
-        scores=[
-           summary_levenshtein,
-           sentiment_exact_match
-        ]
+        scores=[summary_levenshtein, sentiment_exact_match],
     )
+
 
 if __name__ == "__main__":
     run()

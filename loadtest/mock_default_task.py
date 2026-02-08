@@ -302,7 +302,7 @@ def mock_answer_question(query: str) -> str:
 
     return response
 
-if "__name__" == "__main__":
+if __name__ == "__main__":
     query_templates = [
         lambda: fake.sentence(),
         lambda: f"How do I {fake.word()} {fake.word()}?",

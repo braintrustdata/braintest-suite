@@ -3,7 +3,7 @@ import requests
 import os
 import random
 import yaml
-from mock_default_task import mock_answer_question
+from loadtest.mock_default_task import mock_answer_question
 from dotenv import load_dotenv
 
 

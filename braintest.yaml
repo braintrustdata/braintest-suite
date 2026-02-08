@@ -3,8 +3,8 @@ braintrust:
   api_url: https://api.braintrust.dev
 
 loadtest:
-  run: true
-  locustfile_path: ./src/locustfile.py
+  run: True
+  locustfile_path: ./src//loadtest/loadtest.py
   params:
     peak_concurrency: 100 # Number of users at peak load
     ramp_up: 1 # new users spawned per second
@@ -12,9 +12,31 @@ loadtest:
     wait_time:  #amount of time to wait between simulating a new request from a user (a value is chosen at random bw the bounds)
       min: 1 
       max: 5
-    
 
 evaltest:
-  run: true
-  dataset_size: 100 # Number of rows in dataset
-  
+  run: True
+  project_id: 74860a40-6c03-41b7-9277-15836188e258 # if null a new project will be created
+  name: test-large #Name for this eval
+  dataset:
+    name: test-large-dataset
+    description: A large test dataset for conducting a load test of a large eval
+    initialize_dataset: true
+    size: 100 # Number of rows in dataset
+    flush_batch_size: 25 # How many events to write to the dataset at a time
+    shape: # Currently not read, but below is the sample data shape used
+      input: |
+        {
+          "name": str,
+          "address": str,
+          "message": str
+        }
+      expected: |
+        {
+          "sentiment": ["positive", "negative", "neutral"],
+          "summary": str
+        }
+      metadata: |
+        {
+          "model": ["sonnet-4", "sonnet-5", "gpt-4", "gpt-5"],
+          "tokens": int
+        }

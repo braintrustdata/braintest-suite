@@ -18,7 +18,7 @@ def _mock_llm(
         )
 
     response = " ".join([fake.sentence() for _ in range(num_sentences)])
-    time.sleep(random.randint(0,2))
+    # time.sleep(random.randint(0,2))
     return response
 
 @traced

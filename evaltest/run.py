@@ -24,7 +24,7 @@ config = load_config()
 def create_project() -> str:
     api_url = config["braintrust"]["api_url"]
     payload = {
-        "name": f"{config["evaltest"].get("name")}-project",
+        "name": config["braintrust"]["project_name"],
         "description": "Project for testing a large eval"
     }
     headers = {

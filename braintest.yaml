@@ -3,15 +3,14 @@ braintrust:
   api_url: https://api.braintrust.dev
 
 evaltest:
-  run: True
-  project_id: <id> # if null a new project will be created
+  run: False
+  project_id: null # if null or blank, will create a new project with name above
   name: test-large #Name for this eval
   dataset:
     name: test-large-dataset
     description: A large test dataset for conducting a load test of a large eval
-    initialize_dataset: true
-    size: 100 # Number of rows in dataset
-    flush_batch_size: 25 # How many events to write to the dataset at a time
+    size: 100 # Number of rows to populate in dataset
+    flush_batch_size: 25 # How many events to write to Braintrust at a time
     shape: # Currently not read, but below is the sample data shape used
       input: |
         {
@@ -32,13 +31,13 @@ evaltest:
 
 loadtest:
   run: True
-  locustfile_path: loadtest/run.py
+  locustfile_path: loadtest/run.py # Only modify if you change the file name or path for whatever reason
   autostart: True # Whether the test should start automatically or be triggered from the web UI. 
-  web_ui_port: 8089
+  web_ui_port: 8089 # Port at which to run the locust UI on localhost. Only modify if you already have a service running on the default
   params:
     peak_concurrency: 50 # Number of users at peak load
     ramp_up: 2 # new users spawned per second
-    run_time: 30s #e.g. 20s, 3m, 2h, 1h20m, 3h30m10s, etc.
+    run_time: 1m #e.g. 20s, 3m, 2h, 1h20m, 3h30m10s, etc.
     wait_time:  #amount of time to wait between simulating a new request from a user (a value is chosen at random bw the bounds)
       min: 1 
       max: 5

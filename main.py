@@ -57,7 +57,7 @@ def run_loadtest(config):
     # Add autostart flag if enabled
     if autostart:
         cmd.append('--autostart')
-        cmd.extend(['--auto-quit', '10'])
+        cmd.extend(['--autoquit', '10'])
         print(f"Auto start enabled. Test will close 10 seconds after completion. Navigate to web UI to monitor: http://localhost:{port}")
     else:
         print(f"Auto start is disabled. Navigate to the web UI to start and monitor: http://localhost:{port}")

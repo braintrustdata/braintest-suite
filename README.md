@@ -25,12 +25,16 @@ Each test is highly configurable via the `braintest.yaml` config file. The tests
    ```bash
    uv sync
    ```
+3. Activate the virutal env uv creates if it isn't already activated
+  ```bash
+  source .venv/bin/activate
+  ```
 
-3. Create a `.env` file (see `example.env` for reference)
+4. Create a `.env` file (see `example.env` for reference)
 
-4. Configure `braintest.yaml` with your environment details and test parameters.
+5. Configure `braintest.yaml` with your environment details and test parameters.
 
-5. Execute the test suite:
+6. Execute the test suite:
    ```bash
    python main.py
    ```

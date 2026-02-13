@@ -39,7 +39,7 @@ def run_loadtest(config):
     loadtest_config = config.get("loadtest", {})
 
     locustfile_path = loadtest_config.get("locustfile_path", "loadtest/run.py")
-    autostart = loadtest_config.get("autostart", False)
+    headless = loadtest_config.get("headless", False)
     port = str(loadtest_config.get("web_ui_port", 8089))
     host = config.get("braintrust").get("api_url", "https://api.braintrust.dev")
     params = loadtest_config.get("params", {})
@@ -66,26 +66,24 @@ def run_loadtest(config):
         cmd.extend(["--run-time", str(params["run_time"])])
 
     if loadtest_config["logs"].get("html", False):
-        cmd.extend(["--html", f"./results/interactive_report_{datetime.now().timestamp()}.html"])
+        cmd.extend(
+            [
+                "--html",
+                f"./results/interactive_report_{datetime.now().timestamp()}.html",
+            ]
+        )
 
     if loadtest_config["logs"].get("json", False):
         cmd.extend(["--json-file", f"./results/json_{datetime.now().timestamp()}.json"])
-        
+
     if loadtest_config["logs"].get("csv", False):
         cmd.extend(["--csv", f"./results/{datetime.now().timestamp()}"])
-        
-    # Add autostart flag if enabled
-    if autostart:
-        cmd.append("--autostart")
-        cmd.extend(["--autoquit", "10"])
-        print(
-            f"Auto start enabled. Test will close 10 seconds after completion. Navigate to web UI to monitor: http://localhost:{port}"
-        )
-    else:
-        print(
-            f"Auto start is disabled. Navigate to the web UI to start and monitor: http://localhost:{port}"
-        )
 
+    if headless:
+        cmd.append("--headless")
+    else:
+        cmd.extend(["--autostart" "--autoquit", "10s"])
+        
     print(f"Running load test with command: {' '.join(cmd)}")
 
     try:

@@ -35,6 +35,7 @@ loadtest:
   autostart: True # Whether the test should start automatically or be triggered from the web UI. 
   web_ui_port: 8089 # Port at which to run the locust UI on localhost. Only modify if you already have a service running on the default
   params:
+    max_tokens: 20000 # Larger value simulates larger LLM responses. ~100k tokens generates spans ranging in 130-250Kb
     peak_concurrency: 50 # Number of users at peak load
     ramp_up: 2 # new users spawned per second
     run_time: 1m #e.g. 20s, 3m, 2h, 1h20m, 3h30m10s, etc.

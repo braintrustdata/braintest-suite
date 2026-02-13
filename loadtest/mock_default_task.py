@@ -2,24 +2,29 @@ import random
 import time
 from braintrust import traced
 from faker import Faker
+import yaml
+
 fake = Faker()
 
 QUERY_TYPES = ["factual", "coding", "analytical", "creative", "conversational"]
 
-@traced
-def _mock_llm(
-    prompt: str, temperature: float = 0.7, max_tokens: int = None
-) -> str:
-    if max_tokens:
-        num_sentences = max(1, max_tokens // 20)
-    else:
-        num_sentences = (
-            random.randint(1, 8) if temperature > 0.5 else random.randint(2, 5)
-        )
+def load_config() -> dict:
+    with open("./braintest.yaml", "r") as f:
+        config = yaml.safe_load(f)
 
-    response = " ".join([fake.sentence() for _ in range(num_sentences)])
+    return config
+
+config = load_config()
+
+@traced
+def _mock_llm() -> str:
+    max_tokens = config["loadtest"]["params"]["max_tokens"]
+    num_sentences = max_tokens // 20 # Divide by 20 bc it is roughly avg words/sentence
+
+    response = fake.paragraph(nb_sentences=num_sentences) # By default there's a 40% variation in sentence ct
     # time.sleep(random.randint(0,2))
     return response
+
 
 @traced
 def _mock_classify_query(query: str) -> dict:
@@ -33,6 +38,7 @@ def _mock_classify_query(query: str) -> dict:
         "requires_tools": requires_tools,
         "intent": fake.catch_phrase(),
     }
+
 
 @traced
 def _mock_create_plan(query: str, classification: dict) -> list:
@@ -57,6 +63,7 @@ def _mock_create_plan(query: str, classification: dict) -> list:
 
     return plan_steps
 
+
 @traced
 def _mock_search_knowledge_base(query: str) -> list:
     num_results = random.randint(2, 8)
@@ -73,6 +80,7 @@ def _mock_search_knowledge_base(query: str) -> list:
         )
 
     return sorted(results, key=lambda x: x["relevance_score"], reverse=True)
+
 
 @traced
 def _mock_search_web(query: str) -> list:
@@ -91,6 +99,7 @@ def _mock_search_web(query: str) -> list:
 
     return results
 
+
 @traced
 def _mock_execute_code(code_snippet: str) -> dict:
     success = random.random() > 0.15
@@ -98,9 +107,7 @@ def _mock_execute_code(code_snippet: str) -> dict:
     if success:
         return {
             "status": "success",
-            "output": "\n".join(
-                [fake.sentence() for _ in range(random.randint(1, 4))]
-            ),
+            "output": "\n".join([fake.sentence() for _ in range(random.randint(1, 4))]),
             "execution_time_ms": random.randint(50, 500),
         }
     else:
@@ -110,6 +117,7 @@ def _mock_execute_code(code_snippet: str) -> dict:
             "execution_time_ms": random.randint(10, 100),
         }
 
+
 @traced
 def _mock_query_database(sql_query: str) -> list:
     num_rows = random.randint(5, 50)
@@ -118,16 +126,13 @@ def _mock_query_database(sql_query: str) -> list:
     results = []
     for _ in range(num_rows):
         row = {
-            col: (
-                fake.word()
-                if random.random() > 0.5
-                else random.randint(1, 1000)
-            )
+            col: (fake.word() if random.random() > 0.5 else random.randint(1, 1000))
             for col in columns
         }
         results.append(row)
 
     return results
+
 
 @traced
 def _mock_retrieve_context(query: str, query_type: str) -> dict:
@@ -151,6 +156,7 @@ def _mock_retrieve_context(query: str, query_type: str) -> dict:
 
     return context
 
+
 @traced
 def _mock_analyze_data(context: dict) -> dict:
     analysis = {
@@ -160,11 +166,10 @@ def _mock_analyze_data(context: dict) -> dict:
     }
 
     if random.random() > 0.7:
-        analysis["detailed_breakdown"] = _mock_llm(
-            "Provide detailed analysis", temperature=0.3, max_tokens=200
-        )
+        analysis["detailed_breakdown"] = _mock_llm()
 
     return analysis
+
 
 @traced
 def _mock_validate_inputs(query: str) -> dict:
@@ -180,40 +185,23 @@ def _mock_validate_inputs(query: str) -> dict:
 
     return validation
 
+
 @traced
 def _mock_synthesize_results(context: dict, analysis: dict = None) -> str:
-    num_sources = len(context.get("sources", []))
-    synthesis_prompt = f"Synthesize information from {num_sources} sources"
 
-    if analysis:
-        synthesis_prompt += f" with confidence {analysis['confidence']}"
-
-    max_tokens = random.randint(150, 400)
-    synthesized = _mock_llm(
-        synthesis_prompt, temperature=0.5, max_tokens=max_tokens
-    )
+    synthesized = _mock_llm()
 
     return synthesized
+
 
 @traced
 def _mock_generate_response(
     query: str, context: dict = None, synthesis: str = None
 ) -> str:
-    if synthesis:
-        prompt = f"Based on synthesis: {synthesis[:100]}... answer: {query}"
-        temperature = 0.6
-    elif context:
-        prompt = f"Using {len(context)} context items, answer: {query}"
-        temperature = 0.7
-    else:
-        prompt = f"Directly answer: {query}"
-        temperature = 0.8
-
-    response = _mock_llm(
-        prompt, temperature=temperature, max_tokens=random.randint(100, 300)
-    )
+    response = _mock_llm()
 
     return response
+
 
 @traced
 def _mock_quality_check(response: str) -> dict:
@@ -235,14 +223,13 @@ def _mock_quality_check(response: str) -> dict:
 
     return checks
 
+
 @traced
 def _mock_refine_response(original_response: str, suggestions: list) -> str:
-    refinement_prompt = f"Refine response with {len(suggestions)} suggestions"
-    refined = _mock_llm(
-        refinement_prompt, temperature=0.5, max_tokens=random.randint(100, 250)
-    )
+    refined = _mock_llm()
 
     return refined
+
 
 @traced
 def _mock_execute_workflow(query: str, plan: list, classification: dict) -> str:
@@ -284,8 +271,10 @@ def _mock_execute_workflow(query: str, plan: list, classification: dict) -> str:
 
     return response or "Unable to generate response"
 
+
 @traced
 def mock_answer_question(query: str) -> str:
+    
     classification = _mock_classify_query(query)
 
     if classification["complexity"] == "simple" and random.random() > 0.3:
@@ -301,6 +290,7 @@ def mock_answer_question(query: str) -> str:
             response += f"\n\nCode execution: {code_result['output']}"
 
     return response
+
 
 if __name__ == "__main__":
     query_templates = [

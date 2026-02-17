@@ -6,6 +6,7 @@ evaltest:
   run: False # Whether or not to run this test
   project_id: null # if null or blank, will create a new project with name above
   name: test-large #Name for this eval
+  trial_count: 1 # Number of times to run the eval
   dataset:
     name: test-large-dataset
     description: A large test dataset for conducting a load test of a large eval

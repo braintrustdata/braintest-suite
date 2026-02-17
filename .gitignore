@@ -15,6 +15,7 @@ wheels/
 # Output files
 *.html
 **/*.csv
+*.json
 
 # MacOS
 **/.DS_Store

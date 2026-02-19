@@ -82,7 +82,7 @@ def run_loadtest(config):
     if headless:
         cmd.append("--headless")
     else:
-        cmd.extend(["--autostart" "--autoquit", "10s"])
+        cmd.extend(["--autostart", "--autoquit", "10"])
         
     print(f"Running load test with command: {' '.join(cmd)}")
 

@@ -52,8 +52,6 @@ def run_loadtest(config):
         port,
         "--host",
         host,
-        "--csv",
-        f"./loadtest_results/{datetime.now()}",
     ]
 
     if "peak_concurrency" in params:
@@ -65,19 +63,18 @@ def run_loadtest(config):
     if "run_time" in params:
         cmd.extend(["--run-time", str(params["run_time"])])
 
+    # Logs
     if loadtest_config["logs"].get("html", False):
         cmd.extend(
             [
                 "--html",
-                f"./results/interactive_report_{datetime.now().timestamp()}.html",
+                f"interactive_report_{datetime.now().timestamp()}.html",
             ]
         )
-
     if loadtest_config["logs"].get("json", False):
-        cmd.extend(["--json-file", f"./results/json_{datetime.now().timestamp()}.json"])
-
+        cmd.extend(["--json-file", f"json_{datetime.now().timestamp()}.json"])
     if loadtest_config["logs"].get("csv", False):
-        cmd.extend(["--csv", f"./results/{datetime.now().timestamp()}"])
+        cmd.extend(["--csv", f"csv_{datetime.now().timestamp()}"])
 
     if headless:
         cmd.append("--headless")

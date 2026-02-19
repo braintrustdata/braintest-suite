@@ -14,7 +14,6 @@ def load_config():
     return config
 
 config = load_config()
-print(config)
 
 class BraintrustUser(HttpUser):
     min_wait = config["loadtest"]["params"]["wait_time"]["min"]

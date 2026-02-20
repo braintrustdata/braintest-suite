@@ -32,12 +32,11 @@ class BraintrustUser(HttpUser):
             
             
         project = config["braintrust"]["project_name"]
-        logger = init_logger(
+        init_logger(
             project=project,
             async_flush=False,
             api_key=os.getenv("BRAINTRUST_API_KEY")
         )
-        self.logger = logger
 
     @task
     def ask_question(self):

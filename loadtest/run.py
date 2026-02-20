@@ -23,7 +23,14 @@ class BraintrustUser(HttpUser):
     def on_start(self):
         requests.Session = lambda: self.client # Monkey patch request.Session to locust client's. BT SDK uses requests under the hood
         from braintrust import init_logger
-
+        
+        # SSL Cert handling
+        cert_path = os.getenv("REQUESTS_CA_BUNDLE") or os.getenv("SSL_CERT_FILE")
+        if cert_path:
+            print(f"SSL cert path set in env. Using cert at {cert_path}")
+            self.client.verify = cert_path
+            
+            
         project = config["braintrust"]["project_name"]
         logger = init_logger(
             project=project,

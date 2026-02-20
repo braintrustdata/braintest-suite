@@ -68,7 +68,7 @@ def run_loadtest(config):
         cmd.extend(
             [
                 "--html",
-                f"interactive_report_{datetime.now().timestamp()}.html",
+                "{u}_users_{r}_ramp_{t}_time.html",
             ]
         )
     if loadtest_config["logs"].get("json", False):
@@ -80,11 +80,13 @@ def run_loadtest(config):
         cmd.append("--headless")
     else:
         cmd.extend(["--autostart", "--autoquit", "10"])
-        
+
     print(f"Running load test with command: {' '.join(cmd)}")
 
     try:
-        subprocess.run(cmd, check=True, capture_output=False)
+        subprocess.run(
+            cmd, check=True, capture_output=False, env={**os.environ, "PYTHONPATH": "."}
+        )
         print("Loadtest completed successfully.")
         return True
     except subprocess.CalledProcessError as e:

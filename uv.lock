@@ -46,7 +46,7 @@ wheels = [
 
 [[package]]
 name = "braintrust"
-version = "0.5.3"
+version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "chevron" },
@@ -60,9 +60,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "wrapt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/35/19/f6a19880db866bbf863c5948f2c9b39f708c17fc2106c996ee89687a6a27/braintrust-0.5.3.tar.gz", hash = "sha256:e74d1570752fec088b605df99706c64b840dc0ff17c9b6c2864a0a4eb1d1de36", size = 329703, upload-time = "2026-01-31T00:47:09.315Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b9/e3/22e894cbc0d42edf53b77b550b95730243273df645b9807b710158088454/braintrust-0.7.0.tar.gz", hash = "sha256:dd5786c5f087dca0c8c5cf0af7806504fddf23e9c5f0f45f7aeaab35c83aa3e8", size = 356980, upload-time = "2026-02-27T18:52:03.351Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/55/9c/b2fcc6457a94fbeff749073d8cc08c699de01e084bd6dff199a31103c06e/braintrust-0.5.3-py3-none-any.whl", hash = "sha256:7e07e61b7adfaf64229d092fa2a7ab3ec6cc308c95f4c6f63ff46f4d6b0664ba", size = 382128, upload-time = "2026-01-31T00:47:07.591Z" },
+    { url = "https://files.pythonhosted.org/packages/93/f7/707bab2fc31bea9f219f55bb0258aca3ba6fefa222655c19d42838d3c97d/braintrust-0.7.0-py3-none-any.whl", hash = "sha256:f7d965f76da64c6f83b9bd296924c4255a689125119a5c9407e7e763133a8d90", size = 412623, upload-time = "2026-02-27T18:52:01.861Z" },
 ]
 
 [[package]]
@@ -573,7 +573,7 @@ wheels = [
 [[package]]
 name = "load-test-suite"
 version = "0.1.0"
-source = { editable = "." }
+source = { virtual = "." }
 dependencies = [
     { name = "autoevals" },
     { name = "braintrust" },
@@ -586,7 +586,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "autoevals", specifier = ">=0.0.130" },
-    { name = "braintrust", specifier = ">=0.5.3" },
+    { name = "braintrust", specifier = ">=0.7.0" },
     { name = "faker", specifier = ">=40.1.2" },
     { name = "locust", specifier = ">=2.43.2" },
     { name = "python-dotenv", specifier = ">=1.2.1" },

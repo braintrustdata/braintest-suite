@@ -41,7 +41,12 @@ def run_loadtest(config):
     locustfile_path = loadtest_config.get("locustfile_path", "loadtest/run.py")
     headless = loadtest_config.get("headless", False)
     port = str(loadtest_config.get("web_ui_port", 8089))
-    host = config.get("braintrust").get("api_url", "https://api.braintrust.dev")
+    braintrust_config = config.get("braintrust", {})
+    host = braintrust_config.get("api_url")
+    if not host:
+        raise ValueError(
+            "Missing required config: braintrust.api_url in braintest.yaml"
+        )
     processes = str(loadtest_config.get("processes", 1))
     bt_logger_config = loadtest_config.get("braintrust_logger", {})
     params = loadtest_config.get("params", {})

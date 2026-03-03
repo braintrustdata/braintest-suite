@@ -59,8 +59,6 @@ def run_loadtest(config):
         port,
         "--host",
         host,
-        "--processes",
-        processes
     ]
 
     if "peak_concurrency" in params:
@@ -90,8 +88,6 @@ def run_loadtest(config):
     else:
         cmd.extend(["--autostart", "--autoquit", "10"])
 
-    print(f"Running load test with command: {' '.join(cmd)}")
-
     loadtest_env = {**os.environ, "PYTHONPATH": "."}
     if "flush_size" in bt_logger_config:
         loadtest_env["BRAINTRUST_DEFAULT_BATCH_SIZE"] = str(
@@ -100,8 +96,55 @@ def run_loadtest(config):
     if "queue_size" in bt_logger_config:
         loadtest_env["BRAINTRUST_QUEUE_SIZE"] = str(bt_logger_config["queue_size"])
 
+    is_macos = sys.platform == "darwin"
     try:
-        subprocess.run(cmd, check=True, capture_output=False, env=loadtest_env)
+        if is_macos:
+            cmd.extend(["--processes", processes])
+            print(f"Running load test with command: {' '.join(cmd)}")
+            subprocess.run(cmd, check=True, capture_output=False, env=loadtest_env)
+        else:
+            worker_count = int(processes)
+            if worker_count < 1:
+                raise ValueError(
+                    "Invalid config: loadtest.processes must be >= 1 for distributed mode"
+                )
+
+            master_cmd = [*cmd, "--master"]
+            worker_cmd = [
+                "locust",
+                "-f",
+                locustfile_path,
+                "--worker",
+                "--master-host",
+                "127.0.0.1",
+            ]
+
+            print(f"Windows sys detected. Running load test (master) with command: {' '.join(master_cmd)}")
+            print(f"Running load test with {worker_count} worker process(es)")
+
+            workers = []
+            try:
+                for _ in range(worker_count):
+                    workers.append(
+                        subprocess.Popen(
+                            worker_cmd,
+                            env=loadtest_env,
+                        )
+                    )
+
+                subprocess.run(
+                    master_cmd, check=True, capture_output=False, env=loadtest_env
+                )
+            finally:
+                for worker in workers:
+                    if worker.poll() is None:
+                        worker.terminate()
+                for worker in workers:
+                    try:
+                        worker.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        worker.kill()
+
         print("Loadtest completed successfully.")
         return True
     except subprocess.CalledProcessError as e:

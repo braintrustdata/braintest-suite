@@ -96,9 +96,9 @@ def run_loadtest(config):
     if "queue_size" in bt_logger_config:
         loadtest_env["BRAINTRUST_QUEUE_SIZE"] = str(bt_logger_config["queue_size"])
 
-    is_macos = sys.platform == "darwin"
+    is_windows = sys.platform == "win32"
     try:
-        if is_macos:
+        if not is_windows:
             cmd.extend(["--processes", processes])
             print(f"Running load test with command: {' '.join(cmd)}")
             subprocess.run(cmd, check=True, capture_output=False, env=loadtest_env)
@@ -119,7 +119,9 @@ def run_loadtest(config):
                 "127.0.0.1",
             ]
 
-            print(f"Windows sys detected. Running load test (master) with command: {' '.join(master_cmd)}")
+            print(
+                f"Windows detected. Running load test (master) with command: {' '.join(master_cmd)}"
+            )
             print(f"Running load test with {worker_count} worker process(es)")
 
             workers = []

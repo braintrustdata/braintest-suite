@@ -1,12 +1,14 @@
 import random
 import time
-from braintrust import traced
+from braintrust import traced, current_span, JSONAttachment, init_logger
 from faker import Faker
 import yaml
 
 fake = Faker()
 
+MAX_SPAN_SIZE = 5 * 1024 * 1024  # 5MB
 QUERY_TYPES = ["factual", "coding", "analytical", "creative", "conversational"]
+
 
 def load_config() -> dict:
     with open("./braintest.yaml", "r") as f:
@@ -14,17 +16,38 @@ def load_config() -> dict:
 
     return config
 
+
 config = load_config()
 
-@traced
-def _mock_llm() -> str:
+
+@traced(notrace_io=True)
+def _mock_llm() -> dict:
+    span = current_span()
+
     max_tokens = config["loadtest"]["params"]["max_tokens"]
-    num_sentences = max_tokens // 20 # Divide by 20 bc it is roughly avg words/sentence
+    num_sentences = max_tokens // 20  # Divide by 20 bc it is roughly avg words/sentence
 
-    response = fake.paragraph(nb_sentences=num_sentences) # By default there's a 40% variation in sentence ct
-    # time.sleep(random.randint(0,2))
-    return response
+    llm_response = fake.paragraph(
+        nb_sentences=num_sentences
+    )  # By default there's a 40% variation in sentence ct
+    input = {"prompt": "Generate a mock llm response", "input_max_tokens": max_tokens}
+    output = {
+        "output_size": len(llm_response),
+        "num_sentences": num_sentences,
+        "llm_response": llm_response,
+    }
 
+    if len(llm_response) > MAX_SPAN_SIZE:
+        span.log(
+            input=input,
+            output=JSONAttachment(
+                data=output, filename="llm_response.json", pretty=True
+            ),
+        )
+    else:
+        span.log(input=input, output=output)
+
+    return output
 
 @traced
 def _mock_classify_query(query: str) -> dict:
@@ -165,9 +188,6 @@ def _mock_analyze_data(context: dict) -> dict:
         "confidence": round(random.uniform(0.7, 0.98), 3),
     }
 
-    if random.random() > 0.7:
-        analysis["detailed_breakdown"] = _mock_llm()
-
     return analysis
 
 
@@ -187,26 +207,30 @@ def _mock_validate_inputs(query: str) -> dict:
 
 
 @traced
-def _mock_synthesize_results(context: dict, analysis: dict = None) -> str:
-
-    synthesized = _mock_llm()
-
-    return synthesized
+def _mock_synthesize_results(context: dict, analysis: dict = None) -> dict:
+    llm_output = _mock_llm()
+    return {
+        "output_size": llm_output.get("output_size"),
+        "num_sentences": llm_output.get("num_sentences"),
+    }
 
 
 @traced
 def _mock_generate_response(
-    query: str, context: dict = None, synthesis: str = None
-) -> str:
-    response = _mock_llm()
-
-    return response
+    query: str, context: dict = None, synthesis: dict = None
+) -> dict:
+    llm_output = _mock_llm()
+    return {
+        "output_size": llm_output.get("output_size"),
+        "num_sentences": llm_output.get("num_sentences"),
+    }
 
 
 @traced
-def _mock_quality_check(response: str) -> dict:
+def _mock_quality_check(response: dict) -> dict:
+    output_size = response.get("output_size", 0)
     checks = {
-        "length_appropriate": len(response.split()) > 10,
+        "length_appropriate": output_size > 100,
         "coherent": random.random() > 0.1,
         "factual": random.random() > 0.15,
         "helpful": random.random() > 0.2,
@@ -225,14 +249,16 @@ def _mock_quality_check(response: str) -> dict:
 
 
 @traced
-def _mock_refine_response(original_response: str, suggestions: list) -> str:
-    refined = _mock_llm()
-
-    return refined
+def _mock_refine_response(original_response: dict, suggestions: list) -> dict:
+    llm_output = _mock_llm()
+    return {
+        "output_size": llm_output.get("output_size"),
+        "num_sentences": llm_output.get("num_sentences"),
+    }
 
 
 @traced
-def _mock_execute_workflow(query: str, plan: list, classification: dict) -> str:
+def _mock_execute_workflow(query: str, plan: list, classification: dict) -> dict:
     context = None
     analysis = None
     synthesis = None
@@ -242,7 +268,7 @@ def _mock_execute_workflow(query: str, plan: list, classification: dict) -> str:
         if step == "validate_inputs":
             validation = _mock_validate_inputs(query)
             if not validation["is_safe"] or not validation["is_coherent"]:
-                return f"Error: {', '.join(validation['issues'])}"
+                return {"error": validation["issues"]}
 
         elif step == "retrieve_context":
             context = _mock_retrieve_context(query, classification["type"])
@@ -269,12 +295,11 @@ def _mock_execute_workflow(query: str, plan: list, classification: dict) -> str:
                         response, qc_results.get("refinement_suggestions", [])
                     )
 
-    return response or "Unable to generate response"
+    return response or {"error": "Unable to generate response"}
 
 
 @traced
-def mock_answer_question(query: str) -> str:
-    
+def mock_answer_question(query: str) -> dict:
     classification = _mock_classify_query(query)
 
     if classification["complexity"] == "simple" and random.random() > 0.3:
@@ -287,7 +312,7 @@ def mock_answer_question(query: str) -> str:
     if classification["type"] == "coding" and random.random() > 0.6:
         code_result = _mock_execute_code("mock code snippet")
         if code_result["status"] == "success":
-            response += f"\n\nCode execution: {code_result['output']}"
+            response["code_execution"] = code_result["output"]
 
     return response
 
@@ -310,6 +335,6 @@ if __name__ == "__main__":
         print(f"{'='*60}")
 
         response = mock_answer_question(query)
-        print(f"Response length: {len(response)} characters")
+        print(f"Response length: {response.get('output_size', 0)} characters")
 
-        time.sleep(random.uniform(0.1, 0.5))
+        time.sleep(random.uniform(1, 5))

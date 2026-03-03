@@ -42,6 +42,8 @@ def run_loadtest(config):
     headless = loadtest_config.get("headless", False)
     port = str(loadtest_config.get("web_ui_port", 8089))
     host = config.get("braintrust").get("api_url", "https://api.braintrust.dev")
+    processes = str(loadtest_config.get("processes", 1))
+    bt_logger_config = loadtest_config.get("braintrust_logger", {})
     params = loadtest_config.get("params", {})
 
     cmd = [
@@ -52,6 +54,8 @@ def run_loadtest(config):
         port,
         "--host",
         host,
+        "--processes",
+        processes
     ]
 
     if "peak_concurrency" in params:
@@ -83,10 +87,16 @@ def run_loadtest(config):
 
     print(f"Running load test with command: {' '.join(cmd)}")
 
-    try:
-        subprocess.run(
-            cmd, check=True, capture_output=False, env={**os.environ, "PYTHONPATH": "."}
+    loadtest_env = {**os.environ, "PYTHONPATH": "."}
+    if "flush_size" in bt_logger_config:
+        loadtest_env["BRAINTRUST_DEFAULT_BATCH_SIZE"] = str(
+            bt_logger_config["flush_size"]
         )
+    if "queue_size" in bt_logger_config:
+        loadtest_env["BRAINTRUST_QUEUE_SIZE"] = str(bt_logger_config["queue_size"])
+
+    try:
+        subprocess.run(cmd, check=True, capture_output=False, env=loadtest_env)
         print("Loadtest completed successfully.")
         return True
     except subprocess.CalledProcessError as e:

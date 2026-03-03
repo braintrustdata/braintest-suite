@@ -1,42 +1,54 @@
-from locust import HttpUser, task, between
+from locust import HttpUser, task, between, events
 import requests
 import os
 import random
+import time
 import yaml
+from requests.adapters import HTTPAdapter
 from loadtest.mock_default_task import mock_answer_question
 from dotenv import load_dotenv
 
 
 load_dotenv()
+
+
 def load_config():
     with open("./braintest.yaml", "r") as f:
         config = yaml.safe_load(f)
     return config
 
+
 config = load_config()
+_LOGGER_INITIALIZED = False
+
+
+@events.test_start.add_listener
+def _init_braintrust_logger(environment, **kwargs):
+    global _LOGGER_INITIALIZED
+    if _LOGGER_INITIALIZED:
+        return
+
+    # In distributed mode, only workers execute user tasks.
+    # Skip logger init on master to avoid unnecessary setup.
+    if environment.runner and environment.runner.__class__.__name__ == "MasterRunner":
+        return
+
+    from braintrust import init_logger, set_http_adapter
+
+    project = config["braintrust"]["project_name"]
+    pool_maxsize = config["loadtest"]["connection_pool_size"]
+    set_http_adapter(HTTPAdapter(pool_maxsize=pool_maxsize))
+    init_logger(
+        project=project,
+        async_flush=True,
+        api_key=os.getenv("BRAINTRUST_API_KEY"),
+    )
+    _LOGGER_INITIALIZED = True
 
 class BraintrustUser(HttpUser):
     min_wait = config["loadtest"]["params"]["wait_time"]["min"]
     max_wait = config["loadtest"]["params"]["wait_time"]["max"]
     wait_time = between(min_wait, max_wait)
-
-    def on_start(self):
-        requests.Session = lambda: self.client # Monkey patch request.Session to locust client's. BT SDK uses requests under the hood
-        from braintrust import init_logger
-        
-        # SSL Cert handling
-        cert_path = os.getenv("REQUESTS_CA_BUNDLE") or os.getenv("SSL_CERT_FILE")
-        if cert_path:
-            print(f"SSL cert path set in env. Using cert at {cert_path}")
-            self.client.verify = cert_path
-            
-            
-        project = config["braintrust"]["project_name"]
-        init_logger(
-            project=project,
-            async_flush=False,
-            api_key=os.getenv("BRAINTRUST_API_KEY")
-        )
 
     @task
     def ask_question(self):
@@ -53,5 +65,27 @@ class BraintrustUser(HttpUser):
             lambda: f"Compare {fake.word()} and {fake.word()}",
         ]
         query = random.choice(query_templates)()
-
-        response = mock_answer_question(query)
+        start = time.perf_counter()
+        exc = None
+        response = None
+        try:
+            response = mock_answer_question(query)
+            return response
+        except Exception as e:
+            exc = e
+            raise
+        finally:
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            response_length = (
+                response.get("output_size", 0)
+                if isinstance(response, dict)
+                else len(str(response)) if response is not None else 0
+            )
+            events.request.fire(
+                request_type="POST",
+                name="log",
+                response_time=elapsed_ms,
+                response_length=response_length,
+                exception=exc,
+                context={},
+            )

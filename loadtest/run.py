@@ -4,12 +4,15 @@ import os
 import random
 import time
 import yaml
+from faker import Faker
 from requests.adapters import HTTPAdapter
 from loadtest.mock_default_task import mock_answer_question
 from dotenv import load_dotenv
 
 
 load_dotenv()
+
+fake = Faker()
 
 
 def load_config():
@@ -52,9 +55,6 @@ class BraintrustUser(HttpUser):
 
     @task
     def ask_question(self):
-        from faker import Faker
-        fake = Faker()
-
         query_templates = [
             lambda: fake.sentence(),
             lambda: f"How do I {fake.word()} {fake.word()}?",

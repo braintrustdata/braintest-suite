@@ -41,6 +41,7 @@ loadtest:
     flush_size: 100 # Sets BRAINTRUST_DEFAULT_BATCH_SIZE. Maximum number of log messages per network request. Default 100
     queue_size: 25000 # Sets BRAINTRUST_QUEUE_SIZE. Maximum logging queue size. Additional logs drop oldest elements. Default 25k
   params:
+    faker_pool_size: 50 # Number of faker responses to pre-generate
     max_tokens: 25_000 # Larger value simulates larger LLM responses. ~100k tokens generates spans ranging in 100-250Kb
     peak_concurrency: 50 # Number of users at peak load
     ramp_up: 2 # new users spawned per second

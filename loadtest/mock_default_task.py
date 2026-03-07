@@ -20,32 +20,41 @@ def load_config() -> dict:
 config = load_config()
 
 
+def _build_response_pool(pool_size: int, max_tokens: int) -> list:
+    base_sentences = max_tokens // 20
+    pool = []
+    for _ in range(pool_size):
+        num_sentences = max(1, int(base_sentences * random.uniform(0.8, 1.2)))
+        text = fake.paragraph(nb_sentences=num_sentences)
+        pool.append({
+            "output_size": len(text),
+            "num_sentences": num_sentences,
+            "llm_response": text,
+        })
+    return pool
+
+print(f"Generating response pool messages")
+_RESPONSE_POOL = _build_response_pool(
+    config["loadtest"]["params"]["faker_pool_size"],
+    config["loadtest"]["params"]["max_tokens"],
+)
+print(f"Pool messages generated")
+
+
 @traced(notrace_io=True)
 def _mock_llm() -> dict:
     span = current_span()
-
     max_tokens = config["loadtest"]["params"]["max_tokens"]
-    num_sentences = max_tokens // 20  # Divide by 20 bc it is roughly avg words/sentence
+    output = random.choice(_RESPONSE_POOL)
+    input_data = {"prompt": "Generate a mock llm response", "input_max_tokens": max_tokens}
 
-    llm_response = fake.paragraph(
-        nb_sentences=num_sentences
-    )  # By default there's a 40% variation in sentence ct
-    input = {"prompt": "Generate a mock llm response", "input_max_tokens": max_tokens}
-    output = {
-        "output_size": len(llm_response),
-        "num_sentences": num_sentences,
-        "llm_response": llm_response,
-    }
-
-    if len(llm_response) > MAX_SPAN_SIZE:
+    if output["output_size"] > MAX_SPAN_SIZE:
         span.log(
-            input=input,
-            output=JSONAttachment(
-                data=output, filename="llm_response.json", pretty=True
-            ),
+            input=input_data,
+            output=JSONAttachment(data=output, filename="llm_response.json", pretty=True),
         )
     else:
-        span.log(input=input, output=output)
+        span.log(input=input_data, output=output)
 
     return output
 

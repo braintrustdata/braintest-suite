@@ -48,6 +48,17 @@ def _init_braintrust_logger(environment, **kwargs):
     )
     _LOGGER_INITIALIZED = True
 
+
+@events.test_stop.add_listener
+def _flush_braintrust_logger(environment, **kwargs):
+    if not _LOGGER_INITIALIZED:
+        return
+    if environment.runner and environment.runner.__class__.__name__ == "MasterRunner":
+        return
+    from braintrust import flush
+    flush()
+
+
 class BraintrustUser(HttpUser):
     min_wait = config["loadtest"]["params"]["wait_time"]["min"]
     max_wait = config["loadtest"]["params"]["wait_time"]["max"]

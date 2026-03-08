@@ -6,7 +6,7 @@ import time
 import yaml
 from faker import Faker
 from requests.adapters import HTTPAdapter
-from loadtest.mock_default_task import mock_answer_question
+from loadtest.mock_conversation_task import mock_multiturn_conversation
 from dotenv import load_dotenv
 
 
@@ -69,7 +69,7 @@ class BraintrustUser(HttpUser):
         exc = None
         response = None
         try:
-            response = mock_answer_question(query)
+            response = mock_multiturn_conversation(query)
             return response
         except Exception as e:
             exc = e

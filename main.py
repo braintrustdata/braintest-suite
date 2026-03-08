@@ -62,7 +62,9 @@ def run_loadtest(config):
     ]
 
     if "peak_concurrency" in params:
-        cmd.extend(["--users", str(params["peak_concurrency"])])
+        read_concurrency = params.get("read_traffic", {}).get("peak_concurrency", 0)
+        total_users = params["peak_concurrency"] + read_concurrency
+        cmd.extend(["--users", str(total_users)])
 
     if "ramp_up" in params:
         cmd.extend(["--spawn-rate", str(params["ramp_up"])])

@@ -7,6 +7,7 @@ import yaml
 from faker import Faker
 from requests.adapters import HTTPAdapter
 from loadtest.mock_conversation_task import mock_multiturn_conversation
+from util import http_client
 from dotenv import load_dotenv
 
 
@@ -57,6 +58,64 @@ def _flush_braintrust_logger(environment, **kwargs):
         return
     from braintrust import flush
     flush()
+
+
+_read_traffic_config = config["loadtest"]["params"]["read_traffic"]
+
+
+class AdminUser(HttpUser):
+    fixed_count = _read_traffic_config["peak_concurrency"]
+    wait_time = between(
+        _read_traffic_config["wait_time"]["min"],
+        _read_traffic_config["wait_time"]["max"],
+    )
+
+    def on_start(self):
+        self.headers = {
+            "Authorization": f"Bearer {os.getenv('BRAINTRUST_API_KEY')}",
+            "Content-Type": "application/json",
+        }
+        try:
+            response = http_client(
+                "POST",
+                f"{config['braintrust']['api_url']}/v1/project",
+                payload={"name": config["braintrust"]["project_name"]},
+                headers=self.headers,
+            )
+            self.project_id = response.json().get("id")
+        except requests.exceptions.RequestException:
+            self.project_id = None
+
+    @task
+    def query_recent_traces(self):
+        if not self.project_id:
+            return
+        query = f"""
+            SELECT * FROM project_logs('{self.project_id}') ORDER BY created DESC LIMIT 50
+        """
+        self.client.post(
+            "/btql",
+            json={"query": query, "fmt": "json"},
+            headers=self.headers,
+            name="btql_recent_traces",
+        )
+
+    @task
+    def query_span_aggregates(self):
+        if not self.project_id:
+            return
+        query = f"""
+            SELECT span_attributes.type, COUNT(*) as span_count, AVG(metrics.tokens) as avg_tokens
+            FROM project_logs('{self.project_id}')
+            WHERE created > now() - interval 3
+            GROUP BY span_attributes.type
+        """
+        self.client.post(
+            "/btql",
+            json={"query": query, "fmt": "json"},
+            headers=self.headers,
+            name="btql_span_aggregates",
+        )
 
 
 class BraintrustUser(HttpUser):

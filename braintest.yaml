@@ -12,43 +12,29 @@ evaltest:
     description: A large test dataset for conducting a load test of a large eval
     size: 100 # Number of rows to populate in dataset
     flush_batch_size: 25 # How many events to write to Braintrust at a time
-    shape: # Currently not read, but below is the sample data shape used
-      input: |
-        {
-          "name": str,
-          "address": str,
-          "message": str
-        }
-      expected: |
-        {
-          "sentiment": ["positive", "negative", "neutral"],
-          "summary": str
-        }
-      metadata: |
-        {
-          "model": ["sonnet-4", "sonnet-5", "gpt-4", "gpt-5"],
-          "tokens": int
-        }
 
 loadtest:
   run: True # Whether or not to run this test
   locustfile_path: loadtest/run.py # Only modify if you change the file name or path for whatever reason
   headless: False # Run the test without the web UI. This will log stats periodically to console
   web_ui_port: 8089 # Port at which to run the locust UI on localhost. Only modify if you already have a service running on the default
-  processes: 2 # Number of worker processes to spawn (logical CPUs)
-  connection_pool_size: 25 # Pool size for draining logs to BT. Default 10
+  processes: 4 # Number of worker processes to spawn (logical CPUs)
+  connection_pool_size: 10 # Pool size for draining logs to BT. Default 10
   braintrust_logger:
     flush_size: 100 # Sets BRAINTRUST_DEFAULT_BATCH_SIZE. Maximum number of log messages per network request. Default 100
     queue_size: 25000 # Sets BRAINTRUST_QUEUE_SIZE. Maximum logging queue size. Additional logs drop oldest elements. Default 25k
   params:
-    faker_pool_size: 50 # Number of faker responses to pre-generate
-    max_tokens: 25_000 # Larger value simulates larger LLM responses. ~100k tokens generates spans ranging in 100-250Kb
-    peak_concurrency: 50 # Number of users at peak load
+    faker_pool_size: 20 # Number of faker responses to pre-generate
+    max_tokens: 1000 # Larger value simulates larger LLM responses. ~100k tokens generates spans ranging in 100-250Kb
+    peak_concurrency: 20 # Number of users at peak load
     ramp_up: 2 # new users spawned per second
     run_time: 1m #e.g. 20s, 3m, 2h, 1h20m, 3h30m10s, etc.
     wait_time:  #amount of time to wait between simulating a new request from a user (a value is chosen at random bw the bounds)
-      min: 3 
-      max: 5
+      min: 5
+      max: 10
+    read_traffic:
+      peak_concurrency: 2 # Keep low to stay under the 20 calls/min BTQL rate limit
+      btql_calls_per_min: 10 # Global BTQL rate limit (across users)
   logs:
     html: True
     csv: False

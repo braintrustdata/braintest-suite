@@ -1,4 +1,4 @@
-from locust import HttpUser, task, between, events
+from locust import HttpUser, task, between, constant_pacing, events
 import requests
 import os
 import random
@@ -7,6 +7,7 @@ import yaml
 from faker import Faker
 from requests.adapters import HTTPAdapter
 from loadtest.mock_conversation_task import mock_multiturn_conversation
+from util import http_client
 from dotenv import load_dotenv
 
 
@@ -48,7 +49,78 @@ def _init_braintrust_logger(environment, **kwargs):
     )
     _LOGGER_INITIALIZED = True
 
+
+@events.test_stop.add_listener
+def _flush_braintrust_logger(environment, **kwargs):
+    if not _LOGGER_INITIALIZED:
+        return
+    if environment.runner and environment.runner.__class__.__name__ == "MasterRunner":
+        return
+    from braintrust import flush
+    flush()
+
+
+_read_traffic_config = config["loadtest"]["params"]["read_traffic"]
+_read_peak_concurrency = max(0, int(_read_traffic_config.get("peak_concurrency", 0)))
+_read_btql_calls_per_min = float(_read_traffic_config.get("btql_calls_per_min", 20) or 20)
+_read_effective_limit_per_user = _read_btql_calls_per_min / max(_read_peak_concurrency, 1)
+_read_pacing_seconds = 60 / max(_read_effective_limit_per_user, 0.01)
+
+
+class AdminUser(HttpUser):
+    fixed_count = _read_peak_concurrency
+    wait_time = constant_pacing(_read_pacing_seconds)
+
+    def on_start(self):
+        self.headers = {
+            "Authorization": f"Bearer {os.getenv('BRAINTRUST_API_KEY')}",
+            "Content-Type": "application/json",
+        }
+        try:
+            response = http_client(
+                "POST",
+                f"{config['braintrust']['api_url']}/v1/project",
+                payload={"name": config["braintrust"]["project_name"]},
+                headers=self.headers,
+            )
+            self.project_id = response.json().get("id")
+        except requests.exceptions.RequestException:
+            self.project_id = None
+
+    @task(1)
+    def query_recent_traces(self):
+        if not self.project_id:
+            return
+        query = f"""
+            SELECT * FROM project_logs('{self.project_id}') ORDER BY created DESC LIMIT 50
+        """
+        self.client.post(
+            "/btql",
+            json={"query": query, "fmt": "json"},
+            headers=self.headers,
+            name="btql_recent_traces",
+        )
+
+    @task(1)
+    def query_span_aggregates(self):
+        if not self.project_id:
+            return
+        query = f"""
+            SELECT span_attributes.type, COUNT(*) as span_count, AVG(metrics.tokens) as avg_tokens
+            FROM project_logs('{self.project_id}')
+            WHERE created > now() - interval 3
+            GROUP BY span_attributes.type
+        """
+        self.client.post(
+            "/btql",
+            json={"query": query, "fmt": "json"},
+            headers=self.headers,
+            name="btql_span_aggregates",
+        )
+
+
 class BraintrustUser(HttpUser):
+    fixed_count = config["loadtest"]["params"]["peak_concurrency"]
     min_wait = config["loadtest"]["params"]["wait_time"]["min"]
     max_wait = config["loadtest"]["params"]["wait_time"]["max"]
     wait_time = between(min_wait, max_wait)

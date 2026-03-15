@@ -1,4 +1,4 @@
-from locust import HttpUser, task, between, events
+from locust import HttpUser, task, between, constant_pacing, events
 import requests
 import os
 import random
@@ -61,14 +61,15 @@ def _flush_braintrust_logger(environment, **kwargs):
 
 
 _read_traffic_config = config["loadtest"]["params"]["read_traffic"]
+_read_peak_concurrency = max(0, int(_read_traffic_config.get("peak_concurrency", 0)))
+_read_btql_calls_per_min = float(_read_traffic_config.get("btql_calls_per_min", 20) or 20)
+_read_effective_limit_per_user = _read_btql_calls_per_min / max(_read_peak_concurrency, 1)
+_read_pacing_seconds = 60 / max(_read_effective_limit_per_user, 0.01)
 
 
 class AdminUser(HttpUser):
-    fixed_count = _read_traffic_config["peak_concurrency"]
-    wait_time = between(
-        _read_traffic_config["wait_time"]["min"],
-        _read_traffic_config["wait_time"]["max"],
-    )
+    fixed_count = _read_peak_concurrency
+    wait_time = constant_pacing(_read_pacing_seconds)
 
     def on_start(self):
         self.headers = {
@@ -86,7 +87,7 @@ class AdminUser(HttpUser):
         except requests.exceptions.RequestException:
             self.project_id = None
 
-    @task
+    @task(1)
     def query_recent_traces(self):
         if not self.project_id:
             return
@@ -100,7 +101,7 @@ class AdminUser(HttpUser):
             name="btql_recent_traces",
         )
 
-    @task
+    @task(1)
     def query_span_aggregates(self):
         if not self.project_id:
             return
@@ -119,6 +120,7 @@ class AdminUser(HttpUser):
 
 
 class BraintrustUser(HttpUser):
+    fixed_count = config["loadtest"]["params"]["peak_concurrency"]
     min_wait = config["loadtest"]["params"]["wait_time"]["min"]
     max_wait = config["loadtest"]["params"]["wait_time"]["max"]
     wait_time = between(min_wait, max_wait)

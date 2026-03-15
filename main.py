@@ -62,7 +62,9 @@ def run_loadtest(config):
     ]
 
     if "peak_concurrency" in params:
-        read_concurrency = params.get("read_traffic", {}).get("peak_concurrency", 0)
+        read_concurrency = max(
+            0, int(params.get("read_traffic", {}).get("peak_concurrency", 0))
+        )
         total_users = params["peak_concurrency"] + read_concurrency
         cmd.extend(["--users", str(total_users)])
 

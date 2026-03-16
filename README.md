@@ -26,9 +26,9 @@ Each test is highly configurable via the `braintest.yaml` config file. The tests
    uv sync
    ```
 3. Activate the virutal env uv creates if it isn't already activated
-  ```bash
-  source .venv/bin/activate
-  ```
+   ```bash
+   source .venv/bin/activate
+   ```
 
 4. Create a `.env` file (see `example.env` for reference)
 
@@ -37,6 +37,15 @@ Each test is highly configurable via the `braintest.yaml` config file. The tests
 6. Execute the test suite:
    ```bash
    python main.py
+   ```
+
+7. If you are running over SSH on a remote server, use `nohup` so the test keeps running if your session disconnects:
+   ```bash
+   nohup python main.py &
+   ```
+   This will write output to a default log file. To write `nohup` output to a specific file:
+   ```bash
+   nohup python main.py > loadtest.out 2>&1 &
    ```
 
 ## Important Notes

@@ -222,7 +222,13 @@ def mock_multiturn_conversation(query: str) -> dict:
                 final_message = assistant_message
 
             final_content = final_message.get("content") or ""
-            turn_span.log(output=final_content)
+            turn_span.log(
+                output={
+                    "output_size_bytes": len(final_content.encode("utf-8")),
+                    "has_output": bool(final_content),
+                    "used_tool_calls": bool(tool_calls),
+                }
+            )
 
         if not is_last_turn:
             current_user_message = {"role": "user", "content": fake.sentence()}

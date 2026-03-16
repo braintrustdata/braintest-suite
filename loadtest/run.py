@@ -2,13 +2,13 @@ from locust import HttpUser, task, between, constant_pacing, events
 import requests
 import os
 import random
-import time
 import yaml
 from faker import Faker
-from requests.adapters import HTTPAdapter
 from loadtest.mock_conversation_task import mock_multiturn_conversation
+from loadtest.braintrust_http_metrics import BraintrustMetricsAdapter, BraintrustMetricsEmitter
 from util import http_client
 from dotenv import load_dotenv
+from urllib.parse import urlparse
 
 
 load_dotenv()
@@ -24,11 +24,29 @@ def load_config():
 
 config = load_config()
 _LOGGER_INITIALIZED = False
+_BT_METRICS_EMITTER = None
+
+
+def _collect_braintrust_hosts() -> set[str]:
+    hosts = set()
+    api_url = config.get("braintrust", {}).get("api_url")
+    if api_url:
+        parsed = urlparse(api_url)
+        if parsed.netloc:
+            hosts.add(parsed.netloc.lower())
+
+    for env_key in ("BRAINTRUST_API_URL", "BRAINTRUST_PROXY_URL", "BRAINTRUST_APP_URL"):
+        env_url = os.getenv(env_key)
+        if env_url:
+            parsed = urlparse(env_url)
+            if parsed.netloc:
+                hosts.add(parsed.netloc.lower())
+    return hosts
 
 
 @events.test_start.add_listener
 def _init_braintrust_logger(environment, **kwargs):
-    global _LOGGER_INITIALIZED
+    global _LOGGER_INITIALIZED, _BT_METRICS_EMITTER
     if _LOGGER_INITIALIZED:
         return
 
@@ -41,7 +59,15 @@ def _init_braintrust_logger(environment, **kwargs):
 
     project = config["braintrust"]["project_name"]
     pool_maxsize = config["loadtest"]["connection_pool_size"]
-    set_http_adapter(HTTPAdapter(pool_maxsize=pool_maxsize))
+    _BT_METRICS_EMITTER = BraintrustMetricsEmitter(environment=environment)
+    _BT_METRICS_EMITTER.start()
+    set_http_adapter(
+        BraintrustMetricsAdapter(
+            emitter=_BT_METRICS_EMITTER,
+            known_braintrust_hosts=_collect_braintrust_hosts(),
+            pool_maxsize=pool_maxsize,
+        )
+    )
     init_logger(
         project=project,
         async_flush=True,
@@ -52,12 +78,19 @@ def _init_braintrust_logger(environment, **kwargs):
 
 @events.test_stop.add_listener
 def _flush_braintrust_logger(environment, **kwargs):
+    global _BT_METRICS_EMITTER, _LOGGER_INITIALIZED
     if not _LOGGER_INITIALIZED:
         return
     if environment.runner and environment.runner.__class__.__name__ == "MasterRunner":
         return
     from braintrust import flush
-    flush()
+    try:
+        flush()
+    finally:
+        if _BT_METRICS_EMITTER is not None:
+            _BT_METRICS_EMITTER.stop()
+            _BT_METRICS_EMITTER = None
+        _LOGGER_INITIALIZED = False
 
 
 _read_traffic_config = config["loadtest"]["params"]["read_traffic"]
@@ -137,27 +170,4 @@ class BraintrustUser(HttpUser):
             lambda: f"Compare {fake.word()} and {fake.word()}",
         ]
         query = random.choice(query_templates)()
-        start = time.perf_counter()
-        exc = None
-        response = None
-        try:
-            response = mock_multiturn_conversation(query)
-            return response
-        except Exception as e:
-            exc = e
-            raise
-        finally:
-            elapsed_ms = (time.perf_counter() - start) * 1000
-            response_length = (
-                response.get("output_size", 0)
-                if isinstance(response, dict)
-                else len(str(response)) if response is not None else 0
-            )
-            events.request.fire(
-                request_type="POST",
-                name="log",
-                response_time=elapsed_ms,
-                response_length=response_length,
-                exception=exc,
-                context={},
-            )
+        mock_multiturn_conversation(query)

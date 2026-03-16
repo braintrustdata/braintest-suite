@@ -6,6 +6,7 @@ import yaml
 import subprocess
 import sys
 import os
+import signal
 from datetime import datetime
 
 
@@ -100,12 +101,45 @@ def run_loadtest(config):
     if "queue_size" in bt_logger_config:
         loadtest_env["BRAINTRUST_QUEUE_SIZE"] = str(bt_logger_config["queue_size"])
 
+    def _terminate_process_group(process: subprocess.Popen, label: str) -> None:
+        if process.poll() is not None:
+            return
+        print(f"Stopping {label}...")
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        except Exception as e:
+            print(f"Failed to send SIGTERM to {label}: {e}")
+            return
+
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            print(f"{label} did not exit after SIGTERM. Sending SIGKILL...")
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                return
+            except Exception as e:
+                print(f"Failed to send SIGKILL to {label}: {e}")
+
     is_windows = sys.platform == "win32"
     try:
         if not is_windows:
             cmd.extend(["--processes", processes])
             print(f"Running load test with command: {' '.join(cmd)}")
-            subprocess.run(cmd, check=True, capture_output=False, env=loadtest_env)
+            process = subprocess.Popen(
+                cmd,
+                env=loadtest_env,
+                start_new_session=True,
+            )
+            try:
+                returncode = process.wait()
+                if returncode != 0:
+                    raise subprocess.CalledProcessError(returncode, cmd)
+            finally:
+                _terminate_process_group(process, "locust process group")
         else:
             worker_count = int(processes)
             if worker_count < 1:

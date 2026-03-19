@@ -46,12 +46,13 @@ wheels = [
 
 [[package]]
 name = "braintrust"
-version = "0.7.0"
+version = "0.10.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "chevron" },
     { name = "exceptiongroup" },
     { name = "gitpython" },
+    { name = "jsonschema" },
     { name = "python-dotenv" },
     { name = "python-slugify" },
     { name = "requests" },
@@ -60,9 +61,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "wrapt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b9/e3/22e894cbc0d42edf53b77b550b95730243273df645b9807b710158088454/braintrust-0.7.0.tar.gz", hash = "sha256:dd5786c5f087dca0c8c5cf0af7806504fddf23e9c5f0f45f7aeaab35c83aa3e8", size = 356980, upload-time = "2026-02-27T18:52:03.351Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/da/b6/d5b31b1cbba73f2854b60e276b917337a63e2840c5fc1aeaee4552667e67/braintrust-0.10.0.tar.gz", hash = "sha256:ef2a0c1afda97c9715615a89f3fda694d942a946d20df4e0d67116a79ed358c3", size = 405170, upload-time = "2026-03-19T20:02:40.287Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/93/f7/707bab2fc31bea9f219f55bb0258aca3ba6fefa222655c19d42838d3c97d/braintrust-0.7.0-py3-none-any.whl", hash = "sha256:f7d965f76da64c6f83b9bd296924c4255a689125119a5c9407e7e763133a8d90", size = 412623, upload-time = "2026-02-27T18:52:01.861Z" },
+    { url = "https://files.pythonhosted.org/packages/76/b0/7bf048269dcc96e71217b852b689b298b80b903475dccf29eb616374db4b/braintrust-0.10.0-py3-none-any.whl", hash = "sha256:a9bd32375039f050ad15a593a74f6189f07b060a8f29d80b18b33ac6dd37062e", size = 466739, upload-time = "2026-03-19T20:02:38.278Z" },
 ]
 
 [[package]]
@@ -586,7 +587,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "autoevals", specifier = ">=0.0.130" },
-    { name = "braintrust", specifier = ">=0.7.0" },
+    { name = "braintrust", specifier = ">=0.10.0" },
     { name = "faker", specifier = ">=40.1.2" },
     { name = "locust", specifier = ">=2.43.2" },
     { name = "python-dotenv", specifier = ">=1.2.1" },

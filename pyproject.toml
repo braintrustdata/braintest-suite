@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "autoevals>=0.0.130",
-    "braintrust>=0.7.0",
+    "braintrust>=0.10.0",
     "faker>=40.1.2",
     "locust>=2.43.2",
     "python-dotenv>=1.2.1",

@@ -4,11 +4,13 @@ A load testing suite for running benchmarks on self-hosted Braintrust data plane
 
 ## Overview
 
-This suite currently supports two types of tests:
+This suite currently supports three types of tests:
 
 - **Load Test**: Spawns simulated users to bombard the data plane with logs, simulating production traffic
 
 - **Large Eval Test**: Generates a large synthetic dataset and runs an eval against it
+
+- **Functional Test**: Exercises core API create/read/delete flows across key Braintrust resources
 
 The suite can be extended to support additional test types in the future, and that is a goal.
 

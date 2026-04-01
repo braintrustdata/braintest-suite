@@ -27,26 +27,13 @@ This suite is not exhaustive.
 
 It does not attempt to validate every part of the Braintrust data plane. Its current focus is:
 
-- log ingestion driven by simulated user traffic
+- log ingestion driven by simulated user traffic via sustained load that ramps
 - large spans, including attachment conversion for oversized outputs
-- large dataset creation and insertion
-- eval execution against synthetic datasets
+- BTQL query load - one expensive query (span aggregation) and one simpler query to retrieve the latest logs from a page load
 
-It does not guarantee that untested components or workflows will behave the same way under load.
+It does not test irregular traffic patterns such as traffic spikes or custom load profiles.
 
-## Test Modes
-
-The suite has two main paths configured in [`braintest.yaml`](/Users/yash/Projects/load_test_suite/braintest.yaml):
-
-- `loadtest`
-  - Runs a Locust-based workload from [`loadtest/run.py`](/Users/yash/Projects/load_test_suite/loadtest/run.py)
-  - Simulates concurrent users producing Braintrust logs
-  - Can also add a smaller amount of read traffic through BTQL queries
-- `evaltest`
-  - Runs from [`evaltest/run.py`](/Users/yash/Projects/load_test_suite/evaltest/run.py)
-  - Creates a synthetic dataset, inserts events in batches, and runs an eval over that dataset
-
-The mocked tasks do not make real LLM calls. The purpose is to load the Braintrust infrastructure, not an LLM provider.
+It also does not make real LLM calls. The purpose is to load the Braintrust infrastructure, not an LLM provider.
 
 ## Core Load Controls
 
@@ -164,7 +151,8 @@ When `500`s appear:
 - inspect service logs
 - inspect CPU, memory, network, and queue metrics on the data plane services
 - identify which component is being degraded
-
+- Note: seeing `503 - SlowDown` errors is likely on S3 buckets. If these SlowDowns are on the tantivy prefix, this is expected under normal operation. The system will retry.
+ 
 ## How To Conduct A Load Test
 
 Use a repeatable process instead of jumping directly to maximum load.

@@ -63,36 +63,28 @@ The main load-shaping parameters live under `loadtest.params` in [`braintest.yam
 - `read_traffic.*`
   - Optional read-side traffic for BTQL queries
 
-### Approximate RPS
+### Calculating RPS
 
-The most useful first-order indicator is requests per second.
-
-Use:
+The most useful first-order indicator is requests per second (RPS). Normally, the RPS calculation would follow the below math:
 
 ```text
-num_users / avg_wait_time
+RPS = num_users / avg_cycle_time
+avg_cycle_time = avg_response_time + avg_wait_time
 ```
 
 Where:
 
-- `num_users` is the number of simulated users generating the traffic you are measuring
+- `num_users` is the number of simulated users generating the traffic you are measuring (concurrency)
+- `avg_cycle_time` measures total execution time for a simulated task
 - `avg_wait_time` is the average delay between requests, in seconds
 
-A reasonable estimate for wait time is:
+However, RPS calculation in this test suite is more nuanced. That is because the Braintrust logger writes back to the data plane asynchronously from a queue. This flush interval is influenced by several parameters, including spans per trace, flush size, and response times.
 
-```text
-avg_wait_time = (min_wait + max_wait) / 2
-```
+Given this complexity, use the calculation above as a max RPS. Divide this by ~3-5 to get an estimate of expected RPS. Bear in mind this will be heavily influenced by response times.
 
-Example:
-
-- `peak_concurrency = 20`
-- `wait_time.min = 5`
-- `wait_time.max = 10`
-- `avg_wait_time = 7.5`
-- approximate write RPS = `20 / 7.5 = 2.67`
-
-Use this estimate to compare runs and to align the test with an expected production traffic profile.
+RPS is a very good indicator of how the system is performing. It will be inversely correlated to response times.
+- If you see response times increasing, RPS will go down. This is an indicator that the system is at load. 
+- If you RPS flat lining while load is ramping up, that's a sign that the system is overloaded. 
 
 ## Span Size and Payload Shape
 

@@ -1,4 +1,4 @@
-# About This Load Test Suite
+# About This Test Suite
 
 This repository is for exercising a self-hosted Braintrust data plane under controlled load.
 

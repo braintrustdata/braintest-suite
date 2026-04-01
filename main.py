@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Main script to orchestrate evaltest and loadtest execution based on braintest.yaml config.
+Main script to orchestrate functionaltest, evaltest, and loadtest execution
+based on braintest.yaml config.
 """
 import yaml
 import subprocess
@@ -17,8 +18,6 @@ def load_config(config_path="braintest.yaml"):
 
 
 def run_evaltest(config):
-    print("Eval Test")
-    print("=" * 50)
     try:
         subprocess.run(
             [sys.executable, "evaltest/run.py"],
@@ -33,9 +32,23 @@ def run_evaltest(config):
         return False
 
 
+def run_functionaltest(config):
+    try:
+        subprocess.run(
+            [sys.executable, "functional_test/run.py"],
+            check=True,
+            capture_output=False,
+            env={**os.environ, "PYTHONPATH": "."},
+        )
+        print("Functional test completed successfully.")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Functional test failed with error code {e.returncode}")
+        return False
+
+
 def run_loadtest(config):
     print("Load Test")
-    print("=" * 50)
 
     loadtest_config = config.get("loadtest", {})
 
@@ -196,8 +209,9 @@ def run_loadtest(config):
 
 
 def main():
+    print("="*50)
     print("Braintest")
-    print("=" * 50)
+    print("="*50 + "\n")
 
     try:
         print("Loading configuration from braintest.yaml...")
@@ -205,22 +219,33 @@ def main():
 
         results = {}
 
+        if config.get("functionaltest", {}).get("run", False):
+            print("\n-----Running Functional Test-----")
+            functionaltest_success = run_functionaltest(config)
+            results["functionaltest"] = (
+                "SUCCESS" if functionaltest_success else "FAILED"
+            )
+        else:
+            print("Functional test is not enabled. Skipping...")
+            results["functionaltest"] = "SKIPPED"
+
         if config.get("evaltest", {}).get("run", False):
+            print("\n-----Running Eval Test-----")
             evaltest_success = run_evaltest(config)
             results["evaltest"] = "SUCCESS" if evaltest_success else "FAILED"
         else:
-            print("Evaltest is not enabled. Skipping...")
+            print("\nEvaltest is not enabled. Skipping...")
             results["evaltest"] = "SKIPPED"
 
         if config.get("loadtest", {}).get("run", False):
+            print("\n-----Running Locust Load Test-----")
             loadtest_success = run_loadtest(config)
             results["loadtest"] = "SUCCESS" if loadtest_success else "FAILED"
         else:
             print("\nLoadtest is not enabled. Skipping...")
             results["loadtest"] = "SKIPPED"
 
-        print("Test Summary:")
-        print("=" * 50)
+        print("\n-----Test Summary-----")
         for test_name, status in results.items():
             print(f"{test_name}: {status}")
 

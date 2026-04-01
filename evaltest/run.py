@@ -36,7 +36,7 @@ def create_project() -> str:
         response = http_client(
             "post", url=f"{api_url}/v1/project", payload=payload, headers=headers
         )
-        print(f"Project {response.json().get("name")} created successfully")
+        print(f"Project {response.json().get("name")} created/loaded successfully")
     except Exception as e:
         print(f"Fatal error while creating project: {e}")
         exit(1)
@@ -45,8 +45,7 @@ def create_project() -> str:
 
 
 def initialize_dataset() -> dict:
-    print("Creating dataset")
-    print("=" * 50)
+    print("Creating dataset. If dataset already exists, new rows will be appended to existing one.")
     api_url = config["braintrust"]["api_url"]
     project_id = config["evaltest"]["project_id"]
     dataset_config = config["evaltest"]["dataset"]
@@ -157,8 +156,6 @@ def run():
         event_queue.clear()
 
     # Execute eval on this dataset
-    print(f"Executing an eval on this dataset")
-    print("=" * 50)
     Eval(
         f"{config["evaltest"]["name"]}-eval",
         project_id=config["evaltest"]["project_id"],

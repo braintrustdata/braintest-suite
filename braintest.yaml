@@ -2,6 +2,10 @@ braintrust:
   project_name: load-testing-project
   api_url: https://api.braintrust.dev
 
+functionaltest:
+  run: True # Whether or not to run this test
+  name_prefix: functional-test # Prefix used when creating test resources
+
 evaltest:
   run: True # Whether or not to run this test
   project_id: null # if null or blank, will create a new project with name above

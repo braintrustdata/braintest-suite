@@ -1,8 +1,11 @@
-import requests
 import time
 
+import requests
 
-def http_client(method: str, url: str, payload: dict = None, headers: dict = None, max_retries: int = 3) -> requests.Response:
+
+def http_client(
+    method: str, url: str, payload: dict = None, headers: dict = None, max_retries: int = 3
+) -> requests.Response:
     """
     Simple HTTP client with error handling and automatic retry for rate limits.
 
@@ -24,13 +27,7 @@ def http_client(method: str, url: str, payload: dict = None, headers: dict = Non
 
     while retry_count <= max_retries:
         try:
-            response = requests.request(
-                method=method,
-                url=url,
-                json=payload,
-                headers=headers,
-                timeout=30
-            )
+            response = requests.request(method=method, url=url, json=payload, headers=headers, timeout=30)
 
             # Handle rate limiting (429)
             if response.status_code == 429:
@@ -38,19 +35,22 @@ def http_client(method: str, url: str, payload: dict = None, headers: dict = Non
                     response.raise_for_status()
 
                 # Check for Retry-After header
-                retry_after = response.headers.get('Retry-After')
+                retry_after = response.headers.get("Retry-After")
                 if retry_after:
                     try:
                         # Retry-After can be in seconds or a date
                         wait_time = int(retry_after)
                     except ValueError:
                         # If it's a date, default to exponential backoff
-                        wait_time = 2 ** retry_count
+                        wait_time = 2**retry_count
                 else:
                     # Exponential backoff if no Retry-After header
-                    wait_time = 2 ** retry_count
+                    wait_time = 2**retry_count
 
-                print(f"Rate limited (429). Retrying after {wait_time} seconds... (Attempt {retry_count + 1}/{max_retries})")
+                print(
+                    f"Rate limited (429). Retrying after {wait_time} seconds... "
+                    f"(Attempt {retry_count + 1}/{max_retries})"
+                )
                 time.sleep(wait_time)
                 retry_count += 1
                 continue
@@ -64,14 +64,14 @@ def http_client(method: str, url: str, payload: dict = None, headers: dict = Non
             if retry_count >= max_retries:
                 raise
             retry_count += 1
-            time.sleep(2 ** retry_count)
+            time.sleep(2**retry_count)
 
         except requests.exceptions.ConnectionError as e:
             print(f"Connection error: {e}")
             if retry_count >= max_retries:
                 raise
             retry_count += 1
-            time.sleep(2 ** retry_count)
+            time.sleep(2**retry_count)
 
         except requests.exceptions.RequestException as e:
             print(f"Request error: {e}")

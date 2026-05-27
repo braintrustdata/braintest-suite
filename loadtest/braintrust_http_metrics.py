@@ -110,7 +110,7 @@ class BraintrustMetricsAdapter(HTTPAdapter):
         body = request.body
         if body is None:
             return 0
-        if isinstance(body, (bytes, bytearray)):
+        if isinstance(body, bytes | bytearray):
             return len(body)
         if isinstance(body, str):
             return len(body.encode("utf-8"))

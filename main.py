@@ -3,10 +3,11 @@
 Main script to orchestrate functionaltest, evaltest, and loadtest execution
 based on braintest.yaml config.
 """
-import subprocess
-import sys
+
 import os
 import signal
+import subprocess
+import sys
 from datetime import datetime
 
 from config import load_config
@@ -53,9 +54,7 @@ def run_loadtest(config):
     braintrust_config = config.get("braintrust", {})
     host = braintrust_config.get("api_url")
     if not host:
-        raise ValueError(
-            "Missing required config: braintrust.api_url in braintest.yaml"
-        )
+        raise ValueError("Missing required config: braintrust.api_url in braintest.yaml")
     processes = str(loadtest_config.get("processes", 1))
     bt_logger_config = loadtest_config.get("braintrust_logger", {})
     params = loadtest_config.get("params", {})
@@ -71,9 +70,7 @@ def run_loadtest(config):
     ]
 
     if "peak_concurrency" in params:
-        read_concurrency = max(
-            0, int(params.get("read_traffic", {}).get("peak_concurrency", 0))
-        )
+        read_concurrency = max(0, int(params.get("read_traffic", {}).get("peak_concurrency", 0)))
         total_users = params["peak_concurrency"] + read_concurrency
         cmd.extend(["--users", str(total_users)])
 
@@ -103,9 +100,7 @@ def run_loadtest(config):
 
     loadtest_env = {**os.environ, "PYTHONPATH": "."}
     if "flush_size" in bt_logger_config:
-        loadtest_env["BRAINTRUST_DEFAULT_BATCH_SIZE"] = str(
-            bt_logger_config["flush_size"]
-        )
+        loadtest_env["BRAINTRUST_DEFAULT_BATCH_SIZE"] = str(bt_logger_config["flush_size"])
     if "queue_size" in bt_logger_config:
         loadtest_env["BRAINTRUST_QUEUE_SIZE"] = str(bt_logger_config["queue_size"])
 
@@ -151,9 +146,7 @@ def run_loadtest(config):
         else:
             worker_count = int(processes)
             if worker_count < 1:
-                raise ValueError(
-                    "Invalid config: loadtest.processes must be >= 1 for distributed mode"
-                )
+                raise ValueError("Invalid config: loadtest.processes must be >= 1 for distributed mode")
 
             master_cmd = [*cmd, "--master"]
             worker_cmd = [
@@ -165,9 +158,7 @@ def run_loadtest(config):
                 "127.0.0.1",
             ]
 
-            print(
-                f"Windows detected. Running load test (master) with command: {' '.join(master_cmd)}"
-            )
+            print(f"Windows detected. Running load test (master) with command: {' '.join(master_cmd)}")
             print(f"Running load test with {worker_count} worker process(es)")
 
             workers = []
@@ -180,9 +171,7 @@ def run_loadtest(config):
                         )
                     )
 
-                subprocess.run(
-                    master_cmd, check=True, capture_output=False, env=loadtest_env
-                )
+                subprocess.run(master_cmd, check=True, capture_output=False, env=loadtest_env)
             finally:
                 for worker in workers:
                     if worker.poll() is None:
@@ -204,9 +193,9 @@ def run_loadtest(config):
 
 
 def main():
-    print("="*50)
+    print("=" * 50)
     print("Braintest")
-    print("="*50 + "\n")
+    print("=" * 50 + "\n")
 
     try:
         print("Loading configuration from braintest.yaml...")
@@ -217,9 +206,7 @@ def main():
         if config.get("functionaltest", {}).get("run", False):
             print("\n-----Running Functional Test-----")
             functionaltest_success = run_functionaltest(config)
-            results["functionaltest"] = (
-                "SUCCESS" if functionaltest_success else "FAILED"
-            )
+            results["functionaltest"] = "SUCCESS" if functionaltest_success else "FAILED"
         else:
             print("Functional test is not enabled. Skipping...")
             results["functionaltest"] = "SKIPPED"

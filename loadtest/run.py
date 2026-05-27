@@ -1,15 +1,16 @@
-from locust import HttpUser, task, between, constant_pacing, events
-import requests
 import os
 import random
-from faker import Faker
-from loadtest.mock_conversation_task import mock_multiturn_conversation
-from loadtest.braintrust_http_metrics import BraintrustMetricsAdapter, BraintrustMetricsEmitter
-from config import load_config
-from util import http_client
-from dotenv import load_dotenv
 from urllib.parse import urlparse
 
+import requests
+from dotenv import load_dotenv
+from faker import Faker
+from locust import HttpUser, between, constant_pacing, events, task
+
+from config import load_config
+from loadtest.braintrust_http_metrics import BraintrustMetricsAdapter, BraintrustMetricsEmitter
+from loadtest.mock_conversation_task import mock_multiturn_conversation
+from util import http_client
 
 load_dotenv()
 
@@ -78,6 +79,7 @@ def _flush_braintrust_logger(environment, **kwargs):
     if environment.runner and environment.runner.__class__.__name__ == "MasterRunner":
         return
     from braintrust import flush
+
     try:
         flush()
     finally:

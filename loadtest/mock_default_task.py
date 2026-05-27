@@ -1,7 +1,9 @@
 import random
 import time
-from braintrust import traced, current_span, JSONAttachment, init_logger
+
+from braintrust import JSONAttachment, current_span, traced
 from faker import Faker
+
 from config import load_config
 
 fake = Faker()
@@ -19,19 +21,22 @@ def _build_response_pool(pool_size: int, max_tokens: int) -> list:
     for _ in range(pool_size):
         num_sentences = max(1, int(base_sentences * random.uniform(0.8, 1.2)))
         text = fake.paragraph(nb_sentences=num_sentences)
-        pool.append({
-            "output_size": len(text),
-            "num_sentences": num_sentences,
-            "llm_response": text,
-        })
+        pool.append(
+            {
+                "output_size": len(text),
+                "num_sentences": num_sentences,
+                "llm_response": text,
+            }
+        )
     return pool
 
-print(f"Generating response pool messages")
+
+print("Generating response pool messages")
 _RESPONSE_POOL = _build_response_pool(
     config["loadtest"]["params"]["faker_pool_size"],
     config["loadtest"]["params"]["max_tokens"],
 )
-print(f"Pool messages generated")
+print("Pool messages generated")
 
 
 @traced(notrace_io=True)
@@ -50,6 +55,7 @@ def _mock_llm() -> dict:
         span.log(input=input_data, output=output)
 
     return output
+
 
 @traced
 def _mock_classify_query(query: str) -> dict:
@@ -94,7 +100,7 @@ def _mock_search_knowledge_base(query: str) -> list:
     num_results = random.randint(2, 8)
     results = []
 
-    for i in range(num_results):
+    for _i in range(num_results):
         results.append(
             {
                 "id": fake.uuid4(),
@@ -112,7 +118,7 @@ def _mock_search_web(query: str) -> list:
     num_results = random.randint(3, 7)
     results = []
 
-    for i in range(num_results):
+    for _i in range(num_results):
         results.append(
             {
                 "title": fake.catch_phrase(),
@@ -150,10 +156,7 @@ def _mock_query_database(sql_query: str) -> list:
 
     results = []
     for _ in range(num_rows):
-        row = {
-            col: (fake.word() if random.random() > 0.5 else random.randint(1, 1000))
-            for col in columns
-        }
+        row = {col: (fake.word() if random.random() > 0.5 else random.randint(1, 1000)) for col in columns}
         results.append(row)
 
     return results
@@ -171,9 +174,7 @@ def _mock_retrieve_context(query: str, query_type: str) -> dict:
         context["web_results"] = web_results[:2]
 
     if query_type == "coding" and random.random() > 0.5:
-        context["code_examples"] = [
-            fake.paragraph() for _ in range(random.randint(1, 3))
-        ]
+        context["code_examples"] = [fake.paragraph() for _ in range(random.randint(1, 3))]
 
     if query_type == "analytical" and random.random() > 0.6:
         db_results = _mock_query_database(f"SELECT * FROM data WHERE {fake.word()}")
@@ -218,9 +219,7 @@ def _mock_synthesize_results(context: dict, analysis: dict = None) -> dict:
 
 
 @traced
-def _mock_generate_response(
-    query: str, context: dict = None, synthesis: dict = None
-) -> dict:
+def _mock_generate_response(query: str, context: dict = None, synthesis: dict = None) -> dict:
     llm_output = _mock_llm()
     return {
         "output_size": llm_output.get("output_size"),
@@ -241,9 +240,7 @@ def _mock_quality_check(response: dict) -> dict:
 
     if checks["overall_score"] < 0.8:
         checks["needs_refinement"] = True
-        checks["refinement_suggestions"] = [
-            fake.sentence() for _ in range(random.randint(1, 3))
-        ]
+        checks["refinement_suggestions"] = [fake.sentence() for _ in range(random.randint(1, 3))]
     else:
         checks["needs_refinement"] = False
 
@@ -293,9 +290,7 @@ def _mock_execute_workflow(query: str, plan: list, classification: dict) -> dict
             if response:
                 qc_results = _mock_quality_check(response)
                 if qc_results.get("needs_refinement"):
-                    response = _mock_refine_response(
-                        response, qc_results.get("refinement_suggestions", [])
-                    )
+                    response = _mock_refine_response(response, qc_results.get("refinement_suggestions", []))
 
     return response or {"error": "Unable to generate response"}
 
@@ -332,9 +327,9 @@ if __name__ == "__main__":
 
     for i in range(50):
         query = random.choice(query_templates)()
-        print(f"\n{'='*60}")
-        print(f"Query {i+1}: {query}")
-        print(f"{'='*60}")
+        print(f"\n{'=' * 60}")
+        print(f"Query {i + 1}: {query}")
+        print(f"{'=' * 60}")
 
         response = mock_answer_question(query)
         print(f"Response length: {response.get('output_size', 0)} characters")

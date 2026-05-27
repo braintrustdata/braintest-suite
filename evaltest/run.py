@@ -1,9 +1,11 @@
 import os
-from braintrust import init_logger, init_dataset, Eval
-from autoevals import Levenshtein, ExactMatch
+import random
+
+from autoevals import ExactMatch, Levenshtein
+from braintrust import Eval, init_dataset
 from dotenv import load_dotenv
 from faker import Faker
-import random
+
 from config import load_config
 from util import http_client
 
@@ -15,20 +17,15 @@ config = load_config()
 
 def create_project() -> str:
     api_url = config["braintrust"]["api_url"]
-    payload = {
-        "name": config["braintrust"]["project_name"],
-        "description": "Project for testing a large eval"
-    }
+    payload = {"name": config["braintrust"]["project_name"], "description": "Project for testing a large eval"}
     headers = {
-        "Authorization": f"Bearer {os.getenv("BRAINTRUST_API_KEY")}",
+        "Authorization": f"Bearer {os.getenv('BRAINTRUST_API_KEY')}",
         "Content-Type": "application/json",
     }
-    
+
     try:
-        response = http_client(
-            "post", url=f"{api_url}/v1/project", payload=payload, headers=headers
-        )
-        print(f"Project {response.json().get("name")} created/loaded successfully")
+        response = http_client("post", url=f"{api_url}/v1/project", payload=payload, headers=headers)
+        print(f"Project {response.json().get('name')} created/loaded successfully")
     except Exception as e:
         print(f"Fatal error while creating project: {e}")
         exit(1)
@@ -44,17 +41,15 @@ def initialize_dataset() -> dict:
 
     payload = {
         "project_id": project_id,
-        "name": f"{config["evaltest"].get("name")}-dataset",
+        "name": f"{config['evaltest'].get('name')}-dataset",
         "description": dataset_config.get("description"),
     }
     headers = {
-        "Authorization": f"Bearer {os.getenv("BRAINTRUST_API_KEY")}",
+        "Authorization": f"Bearer {os.getenv('BRAINTRUST_API_KEY')}",
         "Content-Type": "application/json",
     }
     try:
-        response = http_client(
-            "post", url=f"{api_url}/v1/dataset", payload=payload, headers=headers
-        )
+        response = http_client("post", url=f"{api_url}/v1/dataset", payload=payload, headers=headers)
     except Exception as e:
         print(f"Fatal error while creating dataset: {e}")
         exit(1)
@@ -74,9 +69,7 @@ def generate_event():
             "summary": fake.paragraph(nb_sentences=random.randint(1, 3)),
         },
         "metadata": {
-            "model": fake.word(
-                ext_word_list=["sonnet-4", "sonnet-5", "gpt-4", "gpt-5"]
-            ),
+            "model": fake.word(ext_word_list=["sonnet-4", "sonnet-5", "gpt-4", "gpt-5"]),
             "tokens": random.randint(100, 10000),
         },
     }
@@ -89,11 +82,11 @@ def insert_events(dataset_id: str, events: list):
 
     payload = {"events": events}
     headers = {
-        "Authorization": f"Bearer {os.getenv("BRAINTRUST_API_KEY")}",
+        "Authorization": f"Bearer {os.getenv('BRAINTRUST_API_KEY')}",
         "Content-Type": "application/json",
     }
     try:
-        response = http_client(
+        http_client(
             method="post",
             url=f"{api_url}/v1/dataset/{dataset_id}/insert",
             payload=payload,
@@ -118,14 +111,11 @@ def summary_levenshtein(input, output: dict, expected: dict):
 
 def sentiment_exact_match(input, output: dict, expected: dict):
     scorer = ExactMatch()
-    return scorer.eval(
-        output=output.get("sentiment"), expected=expected.get("sentiment")
-    )
+    return scorer.eval(output=output.get("sentiment"), expected=expected.get("sentiment"))
 
 
 def run():
-
-    if config["evaltest"].get("project_id") == None:
+    if config["evaltest"].get("project_id") is None:
         print("No project provided, one will be created")
         project_details = create_project()
         config["evaltest"]["project_id"] = project_details["id"]
@@ -149,12 +139,12 @@ def run():
 
     # Execute eval on this dataset
     Eval(
-        f"{config["evaltest"]["name"]}-eval",
+        f"{config['evaltest']['name']}-eval",
         project_id=config["evaltest"]["project_id"],
         data=init_dataset(project_id=dataset["project_id"], name=dataset["name"]),
         task=mock_task,
         scores=[summary_levenshtein, sentiment_exact_match],
-        trial_count=config["evaltest"]["trial_count"]
+        trial_count=config["evaltest"]["trial_count"],
     )
 
 

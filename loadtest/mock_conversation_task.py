@@ -1,14 +1,16 @@
 import json
 import os
 import random
+
+from braintrust import JSONAttachment, current_span, init_logger, start_span, traced
 from dotenv import load_dotenv
 from faker import Faker
-from braintrust import traced, current_span, start_span, JSONAttachment, init_logger
+
 from config import load_config
 
 fake = Faker()
 
-MAX_SPAN_SIZE = 3 * 1024 * 1024 # Above this will upload as attachment
+MAX_SPAN_SIZE = 3 * 1024 * 1024  # Above this will upload as attachment
 
 _TOOL_DEFINITIONS = [
     {
@@ -71,19 +73,22 @@ def _build_response_pool(pool_size: int, max_tokens: int) -> list:
     for _ in range(pool_size):
         num_sentences = max(1, int(base_sentences * random.uniform(0.8, 1.2)))
         text = fake.paragraph(nb_sentences=num_sentences)
-        pool.append({
-            "content": text,
-            "num_sentences": num_sentences,
-            "output_size": len(text),
-        })
+        pool.append(
+            {
+                "content": text,
+                "num_sentences": num_sentences,
+                "output_size": len(text),
+            }
+        )
     return pool
 
-print(f"Building faker message response pool to optimize")
+
+print("Building faker message response pool to optimize")
 _RESPONSE_POOL = _build_response_pool(
     config["loadtest"]["params"]["faker_pool_size"],
     config["loadtest"]["params"]["max_tokens"],
 )
-print(f"Pool generated")
+print("Pool generated")
 
 
 @traced(type="tool")
@@ -104,8 +109,7 @@ def _mock_tool_execution(tool_name: str, arguments: dict) -> dict:
     elif tool_name == "query_database":
         return {
             "rows": [
-                {"id": i, "value": fake.word(), "count": random.randint(1, 1000)}
-                for i in range(random.randint(2, 10))
+                {"id": i, "value": fake.word(), "count": random.randint(1, 1000)} for i in range(random.randint(2, 10))
             ]
         }
     elif tool_name == "search_web":
@@ -177,7 +181,11 @@ def _mock_llm_call(messages: list, tools: list | None = None) -> dict:
         "object": "chat.completion",
         "model": model,
         "choices": [{"index": 0, "message": assistant_message, "finish_reason": finish_reason}],
-        "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens, "total_tokens": prompt_tokens + completion_tokens},
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
     }
 
 
@@ -205,11 +213,13 @@ def mock_multiturn_conversation(query: str) -> dict:
                     tool_name = tool_call["function"]["name"]
                     arguments = json.loads(tool_call["function"]["arguments"])
                     tool_result = _mock_tool_execution(tool_name, arguments)
-                    follow_up_context.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call["id"],
-                        "content": json.dumps(tool_result),
-                    })
+                    follow_up_context.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call["id"],
+                            "content": json.dumps(tool_result),
+                        }
+                    )
                 follow_up = _mock_llm_call(follow_up_context)
                 final_message = follow_up["choices"][0]["message"]
             else:

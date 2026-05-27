@@ -50,18 +50,12 @@ class FunctionalTestRunner:
         self._project_name_base = braintrust_cfg.get("project_name")
         if not self._project_name_base:
             self._project_name_base = "functional-test-project"
-            print(
-                "[functionaltest] Missing config 'braintrust.project_name'. "
-                "Using default: functional-test-project"
-            )
+            print("[functionaltest] Missing config 'braintrust.project_name'. Using default: functional-test-project")
 
         self._name_prefix = functional_cfg.get("name_prefix")
         if not self._name_prefix:
             self._name_prefix = "functional-test"
-            print(
-                "[functionaltest] Missing config 'functionaltest.name_prefix'. "
-                "Using default: functional-test"
-            )
+            print("[functionaltest] Missing config 'functionaltest.name_prefix'. Using default: functional-test")
 
         api_key = os.getenv("BRAINTRUST_API_KEY")
         self._headers = {
@@ -231,12 +225,8 @@ class FunctionalTestRunner:
     def _create_and_read_experiment(self) -> None:
         project_id = self._resource_ids.get("project_id")
         if not project_id:
-            self._skip(
-                "Create experiment", "POST", "/v1/experiment", "Missing project_id"
-            )
-            self._skip(
-                "Get experiment", "GET", "/v1/experiment/{experiment_id}", "Not created"
-            )
+            self._skip("Create experiment", "POST", "/v1/experiment", "Missing project_id")
+            self._skip("Get experiment", "GET", "/v1/experiment/{experiment_id}", "Not created")
             return
 
         payload: dict[str, Any] = {
@@ -480,9 +470,7 @@ class FunctionalTestRunner:
     def _create_and_read_project_tag(self) -> None:
         project_id = self._resource_ids.get("project_id")
         if not project_id:
-            self._skip(
-                "Create project tag", "POST", "/v1/project_tag", "Missing project_id"
-            )
+            self._skip("Create project tag", "POST", "/v1/project_tag", "Missing project_id")
             self._skip(
                 "Get project tag",
                 "GET",
@@ -520,9 +508,7 @@ class FunctionalTestRunner:
         project_id = self._resource_ids.get("project_id")
         if not project_id:
             self._skip("Create function", "POST", "/v1/function", "Missing project_id")
-            self._skip(
-                "Get function", "GET", "/v1/function/{function_id}", "Not created"
-            )
+            self._skip("Get function", "GET", "/v1/function/{function_id}", "Not created")
             return
 
         payload = {
@@ -586,9 +572,7 @@ class FunctionalTestRunner:
         )
 
     def _create_and_read_api_key(self) -> None:
-        payload: dict[str, Any] = {
-            "name": self._unique_name(f"{self._name_prefix}-api-key")
-        }
+        payload: dict[str, Any] = {"name": self._unique_name(f"{self._name_prefix}-api-key")}
 
         ok, body = self._call_api(
             call="Create API key",
@@ -762,11 +746,7 @@ class FunctionalTestRunner:
             )
             return True, body
         except requests.exceptions.RequestException as exc:
-            status_code = (
-                exc.response.status_code
-                if getattr(exc, "response", None) is not None
-                else None
-            )
+            status_code = exc.response.status_code if getattr(exc, "response", None) is not None else None
             self._record(
                 call=call,
                 method=method,
@@ -866,9 +846,7 @@ class FunctionalTestRunner:
             widths.append(max(len(header), content_width))
 
         def _format_row(values: list[str]) -> str:
-            return " | ".join(
-                value.ljust(widths[index]) for index, value in enumerate(values)
-            )
+            return " | ".join(value.ljust(widths[index]) for index, value in enumerate(values))
 
         separator = "-+-".join("-" * width for width in widths)
         print(_format_row(headers))
@@ -876,9 +854,7 @@ class FunctionalTestRunner:
         for row in rows:
             print(_format_row(row))
 
-        attempted = [
-            record for record in self._records if record.status in {"PASS", "FAIL"}
-        ]
+        attempted = [record for record in self._records if record.status in {"PASS", "FAIL"}]
         passed = [record for record in attempted if record.status == "PASS"]
         failed = [record for record in attempted if record.status == "FAIL"]
         skipped = [record for record in self._records if record.status == "SKIPPED"]
@@ -900,11 +876,7 @@ class FunctionalTestRunner:
 
     def _unique_env_var_name(self, prefix: str) -> str:
         raw_name = self._unique_name(prefix).upper()
-        return "".join(
-            char if char.isalnum() or char == "_" else "_" for char in raw_name
-        )
-
-
+        return "".join(char if char.isalnum() or char == "_" else "_" for char in raw_name)
 
 
 def run() -> bool:

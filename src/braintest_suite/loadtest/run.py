@@ -1,8 +1,10 @@
-from locust import HttpUser, task, between, constant_pacing, events
-import requests
 import os
 import random
+
+import requests
+from dotenv import load_dotenv
 from faker import Faker
+from locust import HttpUser, task, between, constant_pacing, events
 from braintest_suite.loadtest.mock_conversation_task import mock_multiturn_conversation
 from braintest_suite.loadtest.braintrust_http_metrics import (
     BraintrustMetricsAdapter,

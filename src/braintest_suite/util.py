@@ -1,6 +1,6 @@
-import requests
 import time
 
+import requests
 
 def http_client(
     method: str,

@@ -1,6 +1,7 @@
 import json
 import os
 import random
+
 from dotenv import load_dotenv
 from faker import Faker
 from braintrust import traced, current_span, start_span, JSONAttachment, init_logger
@@ -81,12 +82,12 @@ def _build_response_pool(pool_size: int, max_tokens: int) -> list:
     return pool
 
 
-print(f"Building faker message response pool to optimize")
+print("Building faker message response pool to optimize")
 _RESPONSE_POOL = _build_response_pool(
     config["loadtest"]["params"]["faker_pool_size"],
     config["loadtest"]["params"]["max_tokens"],
 )
-print(f"Pool generated")
+print("Pool generated")
 
 
 @traced(type="tool")
@@ -113,8 +114,7 @@ def _mock_tool_execution(tool_name: str, arguments: dict) -> dict:
     elif tool_name == "query_database":
         return {
             "rows": [
-                {"id": i, "value": fake.word(), "count": random.randint(1, 1000)}
-                for i in range(random.randint(2, 10))
+                {"id": i, "value": fake.word(), "count": random.randint(1, 1000)} for i in range(random.randint(2, 10))
             ]
         }
     elif tool_name == "search_web":
@@ -193,9 +193,7 @@ def _mock_llm_call(messages: list, tools: list | None = None) -> dict:
         "id": f"chatcmpl-{fake.uuid4()[:8]}",
         "object": "chat.completion",
         "model": model,
-        "choices": [
-            {"index": 0, "message": assistant_message, "finish_reason": finish_reason}
-        ],
+        "choices": [{"index": 0, "message": assistant_message, "finish_reason": finish_reason}],
         "usage": {
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,

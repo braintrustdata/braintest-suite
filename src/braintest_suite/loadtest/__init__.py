@@ -1,3 +1,9 @@
+#!/usr/bin/env python3
+"""
+Main script to orchestrate functionaltest, evaltest, and loadtest execution
+based on braintest.yaml config.
+"""
+
 import os
 import signal
 import subprocess
@@ -19,9 +25,7 @@ def run(config: dict) -> bool:
     braintrust_config = config.get("braintrust", {})
     host = braintrust_config.get("api_url")
     if not host:
-        raise ValueError(
-            "Missing required config: braintrust.api_url in braintest.yaml"
-        )
+        raise ValueError("Missing required config: braintrust.api_url in braintest.yaml")
     processes = str(loadtest_config.get("processes", 1))
     bt_logger_config = loadtest_config.get("braintrust_logger", {})
     params = loadtest_config.get("params", {})
@@ -37,9 +41,7 @@ def run(config: dict) -> bool:
     ]
 
     if "peak_concurrency" in params:
-        read_concurrency = max(
-            0, int(params.get("read_traffic", {}).get("peak_concurrency", 0))
-        )
+        read_concurrency = max(0, int(params.get("read_traffic", {}).get("peak_concurrency", 0)))
         total_users = params["peak_concurrency"] + read_concurrency
         cmd.extend(["--users", str(total_users)])
 
@@ -69,9 +71,7 @@ def run(config: dict) -> bool:
 
     loadtest_env = {**os.environ, "PYTHONPATH": "."}
     if "flush_size" in bt_logger_config:
-        loadtest_env["BRAINTRUST_DEFAULT_BATCH_SIZE"] = str(
-            bt_logger_config["flush_size"]
-        )
+        loadtest_env["BRAINTRUST_DEFAULT_BATCH_SIZE"] = str(bt_logger_config["flush_size"])
     if "queue_size" in bt_logger_config:
         loadtest_env["BRAINTRUST_QUEUE_SIZE"] = str(bt_logger_config["queue_size"])
 
@@ -117,9 +117,7 @@ def run(config: dict) -> bool:
         else:
             worker_count = int(processes)
             if worker_count < 1:
-                raise ValueError(
-                    "Invalid config: loadtest.processes must be >= 1 for distributed mode"
-                )
+                raise ValueError("Invalid config: loadtest.processes must be >= 1 for distributed mode")
 
             master_cmd = [*cmd, "--master"]
             worker_cmd = [
@@ -131,9 +129,7 @@ def run(config: dict) -> bool:
                 "127.0.0.1",
             ]
 
-            print(
-                f"Windows detected. Running load test (master) with command: {' '.join(master_cmd)}"
-            )
+            print(f"Windows detected. Running load test (master) with command: {' '.join(master_cmd)}")
             print(f"Running load test with {worker_count} worker process(es)")
 
             workers = []
@@ -146,9 +142,7 @@ def run(config: dict) -> bool:
                         )
                     )
 
-                subprocess.run(
-                    master_cmd, check=True, capture_output=False, env=loadtest_env
-                )
+                subprocess.run(master_cmd, check=True, capture_output=False, env=loadtest_env)
             finally:
                 for worker in workers:
                     if worker.poll() is None:

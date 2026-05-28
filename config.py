@@ -27,6 +27,27 @@ class EvalTestConfig(BaseModel):
     dataset: DatasetConfig = DatasetConfig()
 
 
+class SmokeTestConfig(BaseModel):
+    run: bool = False
+    org: str | None = None
+    api_url: str | None = None
+    project_prefix: str = "topics-smoke"
+    count: int = 105
+    idle_seconds: int = 10
+    topic_window: str = "1h"
+    generation_cadence: str = "1h"
+    relabel_overlap: str = "10m"
+    allow_below_threshold: bool = False
+    skip_facet_preflight: bool = False
+    skip_running_check: bool = False
+    timeout: int = 60
+    facet_preflight_timeout: int = 30
+    function_visibility_timeout: int = 60
+    function_visibility_interval: int = 2
+    running_check_timeout: int = 90
+    running_check_interval: int = 3
+
+
 class WaitTimeConfig(BaseModel):
     min: int = 5
     max: int = 10
@@ -81,6 +102,7 @@ class Settings(BaseSettings):
     braintrust: BraintrustConfig = BraintrustConfig()
     functionaltest: FunctionalTestConfig = FunctionalTestConfig()
     evaltest: EvalTestConfig = EvalTestConfig()
+    smoketest: SmokeTestConfig = SmokeTestConfig()
     loadtest: LoadTestConfig = LoadTestConfig()
 
     @classmethod

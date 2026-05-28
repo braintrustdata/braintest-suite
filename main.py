@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Main script to orchestrate functionaltest, evaltest, and loadtest execution
-based on braintest.yaml config.
+Main script to orchestrate functionaltest, smoketest, evaltest, and loadtest
+execution based on braintest.yaml config.
 """
 
 import os
@@ -40,6 +40,21 @@ def run_functionaltest(config):
         return True
     except subprocess.CalledProcessError as e:
         print(f"Functional test failed with error code {e.returncode}")
+        return False
+
+
+def run_smoketest(config):
+    try:
+        subprocess.run(
+            [sys.executable, "smoke_test/run.py"],
+            check=True,
+            capture_output=False,
+            env={**os.environ, "PYTHONPATH": "."},
+        )
+        print("Smoke test completed successfully.")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Smoke test failed with error code {e.returncode}")
         return False
 
 
@@ -210,6 +225,14 @@ def main():
         else:
             print("Functional test is not enabled. Skipping...")
             results["functionaltest"] = "SKIPPED"
+
+        if config.get("smoketest", {}).get("run", False):
+            print("\n-----Running Smoke Test-----")
+            smoketest_success = run_smoketest(config)
+            results["smoketest"] = "SUCCESS" if smoketest_success else "FAILED"
+        else:
+            print("\nSmoke test is not enabled. Skipping...")
+            results["smoketest"] = "SKIPPED"
 
         if config.get("evaltest", {}).get("run", False):
             print("\n-----Running Eval Test-----")

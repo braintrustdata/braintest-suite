@@ -4,13 +4,15 @@ A load testing suite for running benchmarks on self-hosted Braintrust data plane
 
 ## Overview
 
-This suite currently supports three types of tests:
+This suite currently supports four types of tests:
 
 - **Load Test**: Spawns simulated users to bombard the data plane with logs, simulating production traffic
 
 - **Large Eval Test**: Generates a large synthetic dataset and runs an eval against it
 
 - **Functional Test**: Exercises core API create/read/delete flows across key Braintrust resources
+
+- **Smoke Test**: Exercises the Topics pipeline on a disposable project with a small synthetic trace set
 
 The suite can be extended to support additional test types in the future, and that is a goal.
 
@@ -63,11 +65,20 @@ To override any config value via environment variable, use `__` (double undersco
 | `loadtest.processes` | `LOADTEST__PROCESSES` |
 | `evaltest.trial_count` | `EVALTEST__TRIAL_COUNT` |
 | `functionaltest.name_prefix` | `FUNCTIONALTEST__NAME_PREFIX` |
+| `smoketest.count` | `SMOKETEST__COUNT` |
 
 Example:
 ```bash
 BRAINTRUST__API_URL=https://my-api.example.com LOADTEST__PROCESSES=8 python main.py
 ```
 
+The Topics smoke test is disabled by default because it creates a disposable
+project and exercises model-backed Topics processing. Enable it with
+`smoketest.run: True`, or run it directly with:
+
+```bash
+uv run python smoke_test/run.py --dry-run
+```
+
 ## Important Notes
-- No actual LLM calls are made in any of these tests. Everything is mocked. The purpose is to load test Braintrust infra, not the LLM provider.
+- Load, eval, and functional tests do not make actual LLM calls. The Topics smoke test exercises model-backed Topics processing, so keep it disabled unless you intentionally want to test that path.

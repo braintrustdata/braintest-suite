@@ -3,11 +3,9 @@ braintrust:
   api_url: https://api.braintrust.dev
 
 functionaltest:
-  run: True # Whether or not to run this test
   name_prefix: functional-test # Prefix used when creating test resources
 
 evaltest:
-  run: True # Whether or not to run this test
   project_id: null # if null or blank, will create a new project with name above
   name: test-large #Name for this eval
   trial_count: 1 # Number of times to run the eval
@@ -18,8 +16,6 @@ evaltest:
     flush_batch_size: 25 # How many events to write to Braintrust at a time
 
 loadtest:
-  run: True # Whether or not to run this test
-  locustfile_path: loadtest/run.py # Only modify if you change the file name or path for whatever reason
   headless: False # Run the test without the web UI. This will log stats periodically to console
   web_ui_port: 8089 # Port at which to run the locust UI on localhost. Only modify if you already have a service running on the default
   processes: 4 # Number of worker processes to spawn (logical CPUs)

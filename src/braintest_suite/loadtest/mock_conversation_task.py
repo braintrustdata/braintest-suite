@@ -2,11 +2,10 @@ import json
 import os
 import random
 
-from braintrust import JSONAttachment, current_span, init_logger, start_span, traced
 from dotenv import load_dotenv
 from faker import Faker
-
-from config import load_config
+from braintrust import traced, current_span, start_span, JSONAttachment, init_logger
+from braintest_suite.config import load_config
 
 fake = Faker()
 
@@ -96,7 +95,11 @@ def _mock_tool_execution(tool_name: str, arguments: dict) -> dict:
     if tool_name == "search_knowledge_base":
         return {
             "results": [
-                {"id": fake.uuid4(), "content": fake.paragraph(), "score": round(random.uniform(0.6, 0.99), 3)}
+                {
+                    "id": fake.uuid4(),
+                    "content": fake.paragraph(),
+                    "score": round(random.uniform(0.6, 0.99), 3),
+                }
                 for _ in range(random.randint(2, 5))
             ]
         }
@@ -104,7 +107,9 @@ def _mock_tool_execution(tool_name: str, arguments: dict) -> dict:
         success = random.random() > 0.15
         return {
             "status": "success" if success else "error",
-            "output": "\n".join(fake.sentence() for _ in range(random.randint(1, 4))) if success else fake.sentence(),
+            "output": "\n".join(fake.sentence() for _ in range(random.randint(1, 4)))
+            if success
+            else fake.sentence(),
         }
     elif tool_name == "query_database":
         return {
@@ -115,7 +120,11 @@ def _mock_tool_execution(tool_name: str, arguments: dict) -> dict:
     elif tool_name == "search_web":
         return {
             "results": [
-                {"title": fake.catch_phrase(), "snippet": fake.sentence(), "url": fake.url()}
+                {
+                    "title": fake.catch_phrase(),
+                    "snippet": fake.sentence(),
+                    "url": fake.url(),
+                }
                 for _ in range(random.randint(3, 6))
             ]
         }
@@ -169,12 +178,16 @@ def _mock_llm_call(messages: list, tools: list | None = None) -> dict:
     if output_size > MAX_SPAN_SIZE:
         span.log(
             input=messages,
-            output=JSONAttachment(data=assistant_message, filename="completion.json", pretty=True),
+            output=JSONAttachment(
+                data=assistant_message, filename="completion.json", pretty=True
+            ),
             metrics=metrics,
             metadata=metadata,
         )
     else:
-        span.log(input=messages, output=assistant_message, metrics=metrics, metadata=metadata)
+        span.log(
+            input=messages, output=assistant_message, metrics=metrics, metadata=metadata
+        )
 
     return {
         "id": f"chatcmpl-{fake.uuid4()[:8]}",

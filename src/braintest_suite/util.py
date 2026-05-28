@@ -2,9 +2,12 @@ import time
 
 import requests
 
-
 def http_client(
-    method: str, url: str, payload: dict = None, headers: dict = None, max_retries: int = 3
+    method: str,
+    url: str,
+    payload: dict = None,
+    headers: dict = None,
+    max_retries: int = 3,
 ) -> requests.Response:
     """
     Simple HTTP client with error handling and automatic retry for rate limits.
@@ -27,7 +30,9 @@ def http_client(
 
     while retry_count <= max_retries:
         try:
-            response = requests.request(method=method, url=url, json=payload, headers=headers, timeout=30)
+            response = requests.request(
+                method=method, url=url, json=payload, headers=headers, timeout=30
+            )
 
             # Handle rate limiting (429)
             if response.status_code == 429:
@@ -48,8 +53,7 @@ def http_client(
                     wait_time = 2**retry_count
 
                 print(
-                    f"Rate limited (429). Retrying after {wait_time} seconds... "
-                    f"(Attempt {retry_count + 1}/{max_retries})"
+                    f"Rate limited (429). Retrying after {wait_time} seconds... (Attempt {retry_count + 1}/{max_retries})"
                 )
                 time.sleep(wait_time)
                 retry_count += 1

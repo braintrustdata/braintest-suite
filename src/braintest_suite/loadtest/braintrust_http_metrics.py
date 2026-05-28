@@ -79,7 +79,13 @@ class BraintrustMetricsEmitter:
 
 
 class BraintrustMetricsAdapter(HTTPAdapter):
-    def __init__(self, emitter: BraintrustMetricsEmitter, known_braintrust_hosts: set[str], *args, **kwargs):
+    def __init__(
+        self,
+        emitter: BraintrustMetricsEmitter,
+        known_braintrust_hosts: set[str],
+        *args,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self.emitter = emitter
         self.known_braintrust_hosts = {h.lower() for h in known_braintrust_hosts if h}

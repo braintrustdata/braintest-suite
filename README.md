@@ -6,49 +6,82 @@ A load testing suite for running benchmarks on self-hosted Braintrust data plane
 
 This suite currently supports three types of tests:
 
-- **Load Test**: Spawns simulated users to bombard the data plane with logs, simulating production traffic
-
-- **Large Eval Test**: Generates a large synthetic dataset and runs an eval against it
-
-- **Functional Test**: Exercises core API create/read/delete flows across key Braintrust resources
+- **Functional Test** (`functional`): Exercises core API create/read/delete flows across key Braintrust resources
+- **Eval Test** (`evaltest`): Generates a large synthetic dataset and runs an eval against it
+- **Load Test** (`loadtest`): Spawns simulated users to bombard the data plane with logs, simulating production traffic
 
 The suite can be extended to support additional test types in the future, and that is a goal.
 
 Each test is highly configurable via the `braintest.yaml` config file. The tests should be configured to simulate a customer's expected load and usage patterns. We want to ensure that the infra Braintrust is hosted on can handle the customer's use case, and size up components accordingly if the tests fail.
 
+## Installation
+
+### From source (local development)
+
+```bash
+# Install uv if you don't have it
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Clone and install
+git clone <repo-url> && cd braintest-suite
+uv sync
+```
+
+### From git (remote install)
+
+```bash
+uv pip install git+<repo-url>
+```
+
+A `braintest.yaml` file is expected in the current working directory by default. You can override this with `--config-file path/to/config.yaml`.
+
 ## Getting Started
 
-1. Install uv if you don't have it:
+1. Create a `.env` file (see `example.env` for reference)
+
+2. Configure `braintest.yaml` with your environment details and test parameters.
+
+3. Run a test suite:
    ```bash
-   curl -LsSf https://astral.sh/uv/install.sh | sh
+   braintest run all
    ```
 
-2. Install dependencies:
-   ```bash
-   uv sync
-   ```
-3. Activate the virtual env uv creates if it isn't already activated
-   ```bash
-   source .venv/bin/activate
-   ```
+## CLI Usage
 
-4. Create a `.env` file (see `example.env` for reference)
+The `braintest` CLI is the main entry point. Running it with no arguments shows help. Use `run` to execute suites.
 
-5. Configure `braintest.yaml` with your environment details and test parameters.
+```bash
+# Show help
+braintest
 
-6. Execute the test suite:
-   ```bash
-   python main.py
-   ```
+# List available test suites
+braintest list
 
-7. If you are running over SSH on a remote server, use `nohup` so the test keeps running if your session disconnects:
-   ```bash
-   nohup python main.py &
-   ```
-   This will write output to a default log file. To write `nohup` output to a specific file:
-   ```bash
-   nohup python main.py > loadtest.out 2>&1 &
-   ```
+# Run specific suites
+braintest run functional
+braintest run functional evaltest
+braintest run loadtest
+braintest run all
+
+# Use a different config file
+braintest --config-file custom.yaml run loadtest
+braintest run --config-file custom.yaml loadtest
+braintest run --config-file custom.yaml all
+```
+
+Each test suite is also runnable as a standalone Python module:
+
+```bash
+python -m braintest_suite.functional_test
+python -m braintest_suite.evaltest
+python -m braintest_suite.loadtest
+```
+
+If you are running over SSH on a remote server, use `nohup` so the test keeps running if your session disconnects:
+
+```bash
+nohup braintest run all > braintest.out 2>&1 &
+```
 
 ## Configuration
 
@@ -66,7 +99,7 @@ To override any config value via environment variable, use `__` (double undersco
 
 Example:
 ```bash
-BRAINTRUST__API_URL=https://my-api.example.com LOADTEST__PROCESSES=8 python main.py
+BRAINTRUST__API_URL=https://my-api.example.com LOADTEST__PROCESSES=8 uv run braintest run loadtest
 ```
 
 ## Important Notes

@@ -9,46 +9,17 @@ import signal
 import subprocess
 import sys
 from datetime import datetime
+from pathlib import Path
 
-from config import load_config
-
-
-def run_evaltest(config):
-    try:
-        subprocess.run(
-            [sys.executable, "evaltest/run.py"],
-            check=True,
-            capture_output=False,
-            env={**os.environ, "PYTHONPATH": "."},
-        )
-        print("Eval test completed successfully.")
-        return True
-    except subprocess.CalledProcessError as e:
-        print(f"Evaltest failed with error code {e.returncode}")
-        return False
+_DEFAULT_LOCUSTFILE = str(Path(__file__).resolve().parent / "run.py")
 
 
-def run_functionaltest(config):
-    try:
-        subprocess.run(
-            [sys.executable, "functional_test/run.py"],
-            check=True,
-            capture_output=False,
-            env={**os.environ, "PYTHONPATH": "."},
-        )
-        print("Functional test completed successfully.")
-        return True
-    except subprocess.CalledProcessError as e:
-        print(f"Functional test failed with error code {e.returncode}")
-        return False
-
-
-def run_loadtest(config):
+def run(config: dict) -> bool:
     print("Load Test")
 
     loadtest_config = config.get("loadtest", {})
 
-    locustfile_path = loadtest_config.get("locustfile_path", "loadtest/run.py")
+    locustfile_path = _DEFAULT_LOCUSTFILE
     headless = loadtest_config.get("headless", False)
     port = str(loadtest_config.get("web_ui_port", 8089))
     braintrust_config = config.get("braintrust", {})
@@ -192,52 +163,4 @@ def run_loadtest(config):
         return False
 
 
-def main():
-    print("=" * 50)
-    print("Braintest")
-    print("=" * 50 + "\n")
-
-    try:
-        print("Loading configuration from braintest.yaml...")
-        config = load_config()
-
-        results = {}
-
-        if config.get("functionaltest", {}).get("run", False):
-            print("\n-----Running Functional Test-----")
-            functionaltest_success = run_functionaltest(config)
-            results["functionaltest"] = "SUCCESS" if functionaltest_success else "FAILED"
-        else:
-            print("Functional test is not enabled. Skipping...")
-            results["functionaltest"] = "SKIPPED"
-
-        if config.get("evaltest", {}).get("run", False):
-            print("\n-----Running Eval Test-----")
-            evaltest_success = run_evaltest(config)
-            results["evaltest"] = "SUCCESS" if evaltest_success else "FAILED"
-        else:
-            print("\nEvaltest is not enabled. Skipping...")
-            results["evaltest"] = "SKIPPED"
-
-        if config.get("loadtest", {}).get("run", False):
-            print("\n-----Running Locust Load Test-----")
-            loadtest_success = run_loadtest(config)
-            results["loadtest"] = "SUCCESS" if loadtest_success else "FAILED"
-        else:
-            print("\nLoadtest is not enabled. Skipping...")
-            results["loadtest"] = "SKIPPED"
-
-        print("\n-----Test Summary-----")
-        for test_name, status in results.items():
-            print(f"{test_name}: {status}")
-
-    except FileNotFoundError as e:
-        print(f"Error: Configuration file not found - {e}")
-        sys.exit(1)
-    except Exception as e:
-        print(f"Fatal error: {e}")
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
+__all__ = ["run"]

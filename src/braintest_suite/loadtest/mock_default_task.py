@@ -4,13 +4,12 @@ import time
 from braintrust import JSONAttachment, current_span, traced
 from faker import Faker
 
-from config import load_config
+from braintest_suite.config import load_config
 
 fake = Faker()
 
 MAX_SPAN_SIZE = 5 * 1024 * 1024  # 5MB
 QUERY_TYPES = ["factual", "coding", "analytical", "creative", "conversational"]
-
 
 config = load_config()
 
@@ -44,12 +43,17 @@ def _mock_llm() -> dict:
     span = current_span()
     max_tokens = config["loadtest"]["params"]["max_tokens"]
     output = random.choice(_RESPONSE_POOL)
-    input_data = {"prompt": "Generate a mock llm response", "input_max_tokens": max_tokens}
+    input_data = {
+        "prompt": "Generate a mock llm response",
+        "input_max_tokens": max_tokens,
+    }
 
     if output["output_size"] > MAX_SPAN_SIZE:
         span.log(
             input=input_data,
-            output=JSONAttachment(data=output, filename="llm_response.json", pretty=True),
+            output=JSONAttachment(
+                data=output, filename="llm_response.json", pretty=True
+            ),
         )
     else:
         span.log(input=input_data, output=output)

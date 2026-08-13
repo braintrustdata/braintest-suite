@@ -30,10 +30,11 @@ It does not attempt to validate every part of the Braintrust data plane. Its cur
 - log ingestion driven by simulated user traffic via sustained load that ramps
 - large spans, including attachment conversion for oversized outputs
 - BTQL query load - one expensive query (span aggregation) and one simpler query to retrieve the latest logs from a page load
+- optional cutover-path traffic (`cutover_traffic`) for authenticated `/v1/eval`, `/function/eval`, and `/v1/proxy/chat/completions`
 
 It does not test irregular traffic patterns such as traffic spikes or custom load profiles.
 
-It also does not make real LLM calls. The purpose is to load the Braintrust infrastructure, not an LLM provider.
+The main BraintrustUser path still avoids real LLM calls. Cutover proxy chat completions use `cutover_traffic.proxy_model` and may call a real provider; keep that concurrency low during deploys. Eval/function tasks use tiny inline datasets and autoevals globals (similar to evaltest).
 
 ## Core Load Controls
 
@@ -49,6 +50,9 @@ The main load-shaping parameters live under `loadtest.params` in [`braintest.yam
   - Total duration of the run
 - `read_traffic.*`
   - Optional read-side traffic for BTQL queries
+- `cutover_traffic.*`
+  - Optional authenticated traffic for `/v1/eval`, `/function/eval`, and `/v1/proxy/chat/completions`
+  - Set `peak_concurrency: 0` to disable
 
 ### Calculating RPS
 

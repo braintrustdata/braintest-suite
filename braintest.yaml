@@ -35,6 +35,14 @@ loadtest:
     read_traffic:
       peak_concurrency: 2 # Keep low to stay under the 20 calls/min BTQL rate limit
       btql_calls_per_min: 10 # Global BTQL rate limit (across users)
+    cutover_traffic:
+      # Authenticated traffic for ECS cutover paths (eval / function / proxy).
+      # Set peak_concurrency to 0 to disable.
+      # Keep this fairly chatty so short CF/ALB blips show up in Locust.
+      peak_concurrency: 4
+      calls_per_min: 60 # Shared across eval + function/eval + proxy chat completions
+      proxy_model: gpt-4o-mini # Used for POST /v1/proxy/chat/completions
+      eval_timeout_seconds: 120
   logs:
     html: True
     csv: False

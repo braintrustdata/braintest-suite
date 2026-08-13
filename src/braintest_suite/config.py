@@ -44,6 +44,19 @@ class ReadTrafficConfig(StrictBaseModel):
     btql_calls_per_min: float
 
 
+class CutoverTrafficConfig(StrictBaseModel):
+    """Authenticated traffic for ECS/CloudFront cutover paths.
+
+    Exercises /v1/eval, /function/eval, and /v1/proxy/chat/completions so phase-1
+    and phase-2 deploys are covered beyond log ingest + BTQL.
+    """
+
+    peak_concurrency: int = 0
+    calls_per_min: float = 6
+    proxy_model: str = "gpt-4o-mini"
+    eval_timeout_seconds: float = 120
+
+
 class LoadTestParams(StrictBaseModel):
     faker_pool_size: int
     max_tokens: int
@@ -52,6 +65,7 @@ class LoadTestParams(StrictBaseModel):
     run_time: str
     wait_time: WaitTimeConfig
     read_traffic: ReadTrafficConfig
+    cutover_traffic: CutoverTrafficConfig = Field(default_factory=CutoverTrafficConfig)
 
 
 class BraintrustLoggerConfig(StrictBaseModel):

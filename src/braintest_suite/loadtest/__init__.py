@@ -42,7 +42,10 @@ def run(config: dict) -> bool:
 
     if "peak_concurrency" in params:
         read_concurrency = max(0, int(params.get("read_traffic", {}).get("peak_concurrency", 0)))
-        total_users = params["peak_concurrency"] + read_concurrency
+        cutover_concurrency = max(
+            0, int(params.get("cutover_traffic", {}).get("peak_concurrency", 0))
+        )
+        total_users = params["peak_concurrency"] + read_concurrency + cutover_concurrency
         cmd.extend(["--users", str(total_users)])
 
     if "ramp_up" in params:

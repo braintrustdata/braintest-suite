@@ -5,8 +5,9 @@ import requests
 def http_client(
     method: str,
     url: str,
-    payload: dict = None,
-    headers: dict = None,
+    payload: dict | None = None,
+    data: bytes | None = None,
+    headers: dict | None = None,
     max_retries: int = 3,
 ) -> requests.Response:
     """
@@ -15,7 +16,8 @@ def http_client(
     Args:
         method: HTTP method (GET, POST, PUT, DELETE, etc.)
         url: Target URL
-        payload: Request payload (JSON body)
+        payload: Request JSON body
+        data: Raw request body. Cannot be combined with payload.
         headers: Request headers
         max_retries: Maximum number of retries for rate limit errors
 
@@ -25,14 +27,25 @@ def http_client(
     Raises:
         requests.exceptions.RequestException: For non-recoverable errors
     """
+    if payload is not None and data is not None:
+        raise ValueError("Specify either payload or data, not both")
+
     method = method.upper()
     retry_count = 0
 
     while retry_count <= max_retries:
         try:
-            response = requests.request(
-                method=method, url=url, json=payload, headers=headers, timeout=30
-            )
+            request_kwargs: dict[str, object] = {
+                "method": method,
+                "url": url,
+                "headers": headers,
+                "timeout": 30,
+            }
+            if data is None:
+                request_kwargs["json"] = payload
+            else:
+                request_kwargs["data"] = data
+            response = requests.request(**request_kwargs)
 
             # Handle rate limiting (429)
             if response.status_code == 429:

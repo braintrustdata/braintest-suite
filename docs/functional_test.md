@@ -6,6 +6,13 @@ This test validates core Braintrust API functionality with create/read coverage,
 
 - `POST /v1/project` creates a project for the test run.
 - `GET /v1/project/{project_id}` verifies the project can be read.
+- `POST /attachment` requests a signed object-store upload URL for a text attachment.
+- `PUT <attachment object store>` uploads the attachment bytes.
+- `POST /attachment/status` records the successful upload.
+- `GET /attachment` retrieves the attachment status and signed download URL.
+- `GET <attachment object store>` downloads the attachment and verifies its bytes.
+- The inserted project-log event references the uploaded attachment.
+- `POST /otel/v1/traces`, with an `x-bt-parent` project header, ingests OTLP JSON and Protobuf traces, each uncompressed and `Content-Encoding: gzip`.
 - `POST /v1/project_logs/{project_id}/insert` inserts project log events.
 - `GET /v1/project_logs/{project_id}/fetch` verifies project log events can be fetched.
 - `POST /v1/role` creates a role.

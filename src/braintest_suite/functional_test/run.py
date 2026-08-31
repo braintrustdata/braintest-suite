@@ -1,4 +1,7 @@
+import gzip
+import json
 import os
+import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -10,6 +13,98 @@ from dotenv import load_dotenv
 
 from braintest_suite.config import load_config
 from braintest_suite.util import http_client
+
+
+def _protobuf_varint(value: int) -> bytes:
+    encoded = bytearray()
+    while value > 0x7F:
+        encoded.append((value & 0x7F) | 0x80)
+        value >>= 7
+    encoded.append(value)
+    return bytes(encoded)
+
+
+def _protobuf_message(field_number: int, value: bytes) -> bytes:
+    return _protobuf_varint(field_number << 3 | 2) + _protobuf_varint(len(value)) + value
+
+
+def _protobuf_varint_field(field_number: int, value: int) -> bytes:
+    return _protobuf_varint(field_number << 3) + _protobuf_varint(value)
+
+
+def _protobuf_fixed64_field(field_number: int, value: int) -> bytes:
+    return _protobuf_varint(field_number << 3 | 1) + value.to_bytes(8, byteorder="little")
+
+
+def _otlp_string_attribute(key: str, value: str) -> bytes:
+    any_value = _protobuf_message(1, value.encode())
+    return _protobuf_message(1, key.encode()) + _protobuf_message(2, any_value)
+
+
+def _otlp_protobuf_payload(
+    trace_id: bytes,
+    span_id: bytes,
+    span_name: str,
+    start_time: int,
+    end_time: int,
+) -> bytes:
+    resource = _protobuf_message(1, _otlp_string_attribute("service.name", "braintest-functional"))
+    scope = _protobuf_message(1, b"braintest-suite.functional-test")
+    status = _protobuf_varint_field(3, 1)
+    span = b"".join(
+        [
+            _protobuf_message(1, trace_id),
+            _protobuf_message(2, span_id),
+            _protobuf_message(5, span_name.encode()),
+            _protobuf_varint_field(6, 1),
+            _protobuf_fixed64_field(7, start_time),
+            _protobuf_fixed64_field(8, end_time),
+            _protobuf_message(9, _otlp_string_attribute("test.suite", "functionaltest")),
+            _protobuf_message(15, status),
+        ]
+    )
+    scope_spans = _protobuf_message(1, scope) + _protobuf_message(2, span)
+    resource_spans = _protobuf_message(1, resource) + _protobuf_message(2, scope_spans)
+    return _protobuf_message(1, resource_spans)
+
+
+def _otlp_json_payload(
+    trace_id: str,
+    span_id: str,
+    span_name: str,
+    start_time: int,
+    end_time: int,
+) -> dict[str, Any]:
+    return {
+        "resourceSpans": [
+            {
+                "resource": {
+                    "attributes": [
+                        {"key": "service.name", "value": {"stringValue": "braintest-functional"}},
+                    ],
+                },
+                "scopeSpans": [
+                    {
+                        "scope": {"name": "braintest-suite.functional-test"},
+                        "spans": [
+                            {
+                                "traceId": trace_id,
+                                "spanId": span_id,
+                                "name": span_name,
+                                "kind": 1,
+                                "startTimeUnixNano": str(start_time),
+                                "endTimeUnixNano": str(end_time),
+                                "attributes": [
+                                    {"key": "test.suite", "value": {"stringValue": "functionaltest"}},
+                                ],
+                                "status": {"code": 1},
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
 
 
 @dataclass
@@ -27,6 +122,7 @@ class FunctionalTestRunner:
         self._config = config if isinstance(config, dict) else {}
         self._records: list[ApiCallRecord] = []
         self._resource_ids: dict[str, str] = {}
+        self._attachment_reference: dict[str, str] | None = None
         self._suffix = uuid.uuid4().hex[:8]
 
         braintrust_cfg = self._config.get("braintrust", {})
@@ -103,7 +199,9 @@ class FunctionalTestRunner:
     def core_steps(self) -> list[Callable[[], None]]:
         return [
             self._create_and_read_project,
+            self._upload_and_read_attachment,
             self._insert_and_fetch_project_logs,
+            self._ingest_otel_trace,
             self._create_and_read_role,
             self._create_and_read_group,
             self._create_and_read_dataset,
@@ -143,11 +241,199 @@ class FunctionalTestRunner:
         if not project_id:
             return
         self._resource_ids["project_id"] = project_id
-        self._call_api(
+        _, project_body = self._call_api(
             call="Get project",
             method="GET",
             endpoint=f"/v1/project/{project_id}",
         )
+        org_id = body.get("org_id") or project_body.get("org_id")
+        if isinstance(org_id, str) and org_id:
+            self._resource_ids["org_id"] = org_id
+        else:
+            self._record(
+                call="Capture project organization ID",
+                method="N/A",
+                endpoint="N/A",
+                status="FAIL",
+                status_code=None,
+                details="Project response did not include an org_id",
+            )
+
+    def _upload_and_read_attachment(self) -> None:
+        org_id = self._resource_ids.get("org_id")
+        if not org_id:
+            self._skip("Create attachment upload", "POST", "/attachment", "Missing org_id")
+            self._skip("Upload attachment data", "PUT", "<attachment object store>", "Not created")
+            self._skip("Record attachment upload status", "POST", "/attachment/status", "Not uploaded")
+            self._skip("Get attachment", "GET", "/attachment", "Not uploaded")
+            self._skip("Download attachment data", "GET", "<attachment object store>", "Not uploaded")
+            return
+
+        attachment_data = b"functional test attachment\n"
+        attachment_reference = {
+            "type": "braintrust_attachment",
+            "filename": "functional-test-attachment.txt",
+            "content_type": "text/plain",
+            "key": str(uuid.uuid4()),
+        }
+        attachment_params = {
+            "key": attachment_reference["key"],
+            "filename": attachment_reference["filename"],
+            "content_type": attachment_reference["content_type"],
+            "org_id": org_id,
+        }
+        ok, upload_metadata = self._call_api(
+            call="Create attachment upload",
+            method="POST",
+            endpoint="/attachment",
+            payload=attachment_params,
+        )
+        if not ok:
+            return
+
+        signed_url = upload_metadata.get("signedUrl")
+        upload_headers = upload_metadata.get("headers")
+        if not isinstance(signed_url, str) or not isinstance(upload_headers, dict):
+            self._record(
+                call="Validate attachment upload metadata",
+                method="N/A",
+                endpoint="/attachment",
+                status="FAIL",
+                status_code=None,
+                details="Attachment upload response did not include signedUrl and headers",
+            )
+            return
+        object_store_headers = {str(key): str(value) for key, value in upload_headers.items()}
+        if "blob.core.windows.net" in signed_url:
+            object_store_headers["x-ms-blob-type"] = "BlockBlob"
+
+        if not self._call_external_api(
+            call="Upload attachment data",
+            method="PUT",
+            endpoint="<attachment object store>",
+            url=signed_url,
+            data=attachment_data,
+            headers=object_store_headers,
+        ):
+            return
+
+        ok, _ = self._call_api(
+            call="Record attachment upload status",
+            method="POST",
+            endpoint="/attachment/status",
+            payload={
+                "key": attachment_reference["key"],
+                "org_id": org_id,
+                "status": {"upload_status": "done"},
+            },
+        )
+        if not ok:
+            return
+
+        ok, attachment_metadata = self._call_api(
+            call="Get attachment",
+            method="GET",
+            endpoint="/attachment",
+            query_params=attachment_params,
+        )
+        if not ok:
+            return
+
+        status = attachment_metadata.get("status")
+        download_url = attachment_metadata.get("downloadUrl")
+        if not isinstance(status, dict) or status.get("upload_status") != "done":
+            self._record(
+                call="Validate attachment upload status",
+                method="N/A",
+                endpoint="/attachment",
+                status="FAIL",
+                status_code=None,
+                details=f"Expected attachment upload_status 'done', got {status!r}",
+            )
+            return
+        if not isinstance(download_url, str):
+            self._record(
+                call="Validate attachment download metadata",
+                method="N/A",
+                endpoint="/attachment",
+                status="FAIL",
+                status_code=None,
+                details="Attachment metadata response did not include downloadUrl",
+            )
+            return
+
+        if not self._call_external_api(
+            call="Download attachment data",
+            method="GET",
+            endpoint="<attachment object store>",
+            url=download_url,
+            expected_content=attachment_data,
+        ):
+            return
+
+        self._attachment_reference = attachment_reference
+
+    def _ingest_otel_trace(self) -> None:
+        project_id = self._resource_ids.get("project_id")
+        variants = (
+            ("Ingest OTEL trace (JSON)", "functional.otel.trace.json", "application/json", False),
+            ("Ingest OTEL trace (gzip JSON)", "functional.otel.trace.json.gzip", "application/json", True),
+            ("Ingest OTEL trace (protobuf)", "functional.otel.trace.protobuf", "application/x-protobuf", False),
+            (
+                "Ingest OTEL trace (gzip protobuf)",
+                "functional.otel.trace.protobuf.gzip",
+                "application/x-protobuf",
+                True,
+            ),
+        )
+        if not project_id:
+            for call, _, _, _ in variants:
+                self._skip(call, "POST", "/otel/v1/traces", "Missing project_id")
+            return
+
+        for call, span_name, content_type, gzip_encoded in variants:
+            start_time = time.time_ns()
+            end_time = time.time_ns()
+            trace_id = uuid.uuid4()
+            span_id = uuid.uuid4().bytes[:8]
+            payload: dict[str, Any] | None = None
+            data: bytes | None = None
+            if content_type == "application/json":
+                payload = _otlp_json_payload(
+                    trace_id.hex,
+                    span_id.hex(),
+                    span_name,
+                    start_time,
+                    end_time,
+                )
+                if gzip_encoded:
+                    data = gzip.compress(json.dumps(payload, separators=(",", ":")).encode())
+                    payload = None
+            else:
+                data = _otlp_protobuf_payload(
+                    trace_id.bytes,
+                    span_id,
+                    span_name,
+                    start_time,
+                    end_time,
+                )
+                if gzip_encoded:
+                    data = gzip.compress(data)
+
+            headers = {
+                "Content-Type": content_type,
+                "x-bt-parent": f"project_id:{project_id}",
+            }
+            if gzip_encoded:
+                headers["Content-Encoding"] = "gzip"
+            self._call_api(
+                call=call,
+                method="POST",
+                endpoint="/otel/v1/traces",
+                payload=payload,
+                data=data,
+                headers=headers,
+            )
 
     def _create_and_read_role(self) -> None:
         payload: dict[str, Any] = {
@@ -349,12 +635,15 @@ class FunctionalTestRunner:
                 "Project logs were not inserted",
             )
             return
+        input_data: dict[str, Any] = {"message": "functional test input"}
+        if self._attachment_reference is not None:
+            input_data["attachment"] = self._attachment_reference
 
         payload = {
             "events": [
                 {
                     "id": self._unique_name("functional-project-log"),
-                    "input": {"message": "functional test input"},
+                    "input": input_data,
                     "output": {"message": "functional test output"},
                     "metadata": {"suite": "functionaltest"},
                     "tags": ["functionaltest"],
@@ -726,7 +1015,9 @@ class FunctionalTestRunner:
         method: str,
         endpoint: str,
         payload: dict[str, Any] | None = None,
+        data: bytes | None = None,
         query_params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> tuple[bool, dict[str, Any]]:
         query = query_params or {}
         filtered_query = {k: v for k, v in query.items() if v is not None}
@@ -741,7 +1032,8 @@ class FunctionalTestRunner:
                 method=method,
                 url=url,
                 payload=payload,
-                headers=self._headers,
+                data=data,
+                headers=self._headers | (headers or {}),
             )
             body = self._parse_json(response)
             self._record(
@@ -764,6 +1056,52 @@ class FunctionalTestRunner:
                 details=self._format_exception(exc),
             )
             return False, {}
+
+    def _call_external_api(
+        self,
+        call: str,
+        method: str,
+        endpoint: str,
+        url: str,
+        data: bytes | None = None,
+        headers: dict[str, str] | None = None,
+        expected_content: bytes | None = None,
+    ) -> bool:
+        try:
+            response = requests.request(method=method, url=url, data=data, headers=headers, timeout=30)
+            response.raise_for_status()
+            if expected_content is not None and response.content != expected_content:
+                raise ValueError("Downloaded attachment data did not match the uploaded content")
+            self._record(
+                call=call,
+                method=method,
+                endpoint=endpoint,
+                status="PASS",
+                status_code=response.status_code,
+                details="OK",
+            )
+            return True
+        except requests.exceptions.RequestException as exc:
+            status_code = exc.response.status_code if getattr(exc, "response", None) is not None else None
+            self._record(
+                call=call,
+                method=method,
+                endpoint=endpoint,
+                status="FAIL",
+                status_code=status_code,
+                details=self._format_exception(exc),
+            )
+            return False
+        except ValueError as exc:
+            self._record(
+                call=call,
+                method=method,
+                endpoint=endpoint,
+                status="FAIL",
+                status_code=None,
+                details=str(exc),
+            )
+            return False
 
     def _extract_id(self, resource_name: str, body: dict[str, Any]) -> str | None:
         resource_id = body.get("id") if isinstance(body, dict) else None

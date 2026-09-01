@@ -4,6 +4,8 @@ import unittest
 from unittest.mock import patch
 
 import requests
+from opentelemetry.exporter.otlp.proto.http import Compression
+from opentelemetry.sdk.trace.export import SpanExportResult
 
 from braintest_suite.functional_test.run import FunctionalTestRunner
 from braintest_suite.util import http_client
@@ -79,14 +81,20 @@ class FunctionalEndpointCoverageTest(unittest.TestCase):
         self.assertEqual(request_mock.call_args_list[1].kwargs["method"], "GET")
         self.assertTrue(all(record.status == "PASS" for record in self.runner._records))
 
+    @patch("braintest_suite.functional_test.run.OTLPSpanExporter")
     @patch("braintest_suite.functional_test.run.http_client")
-    def test_otel_trace_covers_json_and_protobuf_with_and_without_gzip(self, http_client_mock):
+    def test_otel_trace_covers_json_and_protobuf_with_and_without_gzip(
+        self,
+        http_client_mock,
+        exporter_mock,
+    ):
         self.runner._resource_ids["project_id"] = "project-id"
         http_client_mock.return_value = FakeResponse()
+        exporter_mock.return_value.export.return_value = SpanExportResult.SUCCESS
 
         self.runner._ingest_otel_trace()
 
-        self.assertEqual(http_client_mock.call_count, 4)
+        self.assertEqual(http_client_mock.call_count, 2)
         requests_by_name = {
             request.kwargs["payload"]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["name"]: request
             for request in http_client_mock.call_args_list
@@ -107,21 +115,35 @@ class FunctionalEndpointCoverageTest(unittest.TestCase):
             "functional.otel.trace.json.gzip",
         )
 
-        protobuf_request = http_client_mock.call_args_list[2]
-        self.assertEqual(protobuf_request.kwargs["headers"]["Content-Type"], "application/x-protobuf")
-        self.assertNotIn("Content-Encoding", protobuf_request.kwargs["headers"])
-        self.assertTrue(protobuf_request.kwargs["data"].startswith(b"\n"))
-        self.assertIn(b"functional.otel.trace.protobuf", protobuf_request.kwargs["data"])
+        self.assertEqual(exporter_mock.call_count, 2)
+        self.assertEqual(
+            [call.kwargs["compression"] for call in exporter_mock.call_args_list],
+            [Compression.NoCompression, Compression.Gzip],
+        )
+        for constructor_call in exporter_mock.call_args_list:
+            self.assertEqual(
+                constructor_call.kwargs["endpoint"],
+                "https://api.example.test/otel/v1/traces",
+            )
+            self.assertEqual(constructor_call.kwargs["timeout"], 30)
+            self.assertEqual(
+                constructor_call.kwargs["headers"],
+                {
+                    "Authorization": "Bearer test-key",
+                    "x-bt-parent": "project_id:project-id",
+                },
+            )
 
-        gzip_protobuf_request = http_client_mock.call_args_list[3]
-        self.assertEqual(gzip_protobuf_request.kwargs["headers"]["Content-Type"], "application/x-protobuf")
-        self.assertEqual(gzip_protobuf_request.kwargs["headers"]["Content-Encoding"], "gzip")
-        protobuf_payload = gzip.decompress(gzip_protobuf_request.kwargs["data"])
-        self.assertTrue(protobuf_payload.startswith(b"\n"))
-        self.assertIn(b"functional.otel.trace.protobuf.gzip", protobuf_payload)
+        exported_spans = [export_call.args[0][0] for export_call in exporter_mock.return_value.export.call_args_list]
+        self.assertEqual(
+            [span.name for span in exported_spans],
+            ["functional.otel.trace.protobuf", "functional.otel.trace.protobuf.gzip"],
+        )
+        for span in exported_spans:
+            self.assertEqual(span.attributes["test.suite"], "functionaltest")
+            self.assertEqual(span.resource.attributes["service.name"], "braintest-functional")
 
-        for request in http_client_mock.call_args_list:
-            self.assertEqual(request.kwargs["headers"]["x-bt-parent"], "project_id:project-id")
+        self.assertEqual(exporter_mock.return_value.shutdown.call_count, 2)
         self.assertTrue(all(record.status == "PASS" for record in self.runner._records))
 
     @patch("braintest_suite.util.requests.request")

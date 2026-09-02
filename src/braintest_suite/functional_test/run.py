@@ -10,11 +10,9 @@ from urllib.parse import urlencode
 
 import requests
 from dotenv import load_dotenv
-from opentelemetry.exporter.otlp.proto.http import Compression
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import SpanExportResult
 from opentelemetry.trace import Status, StatusCode
 
 from braintest_suite.config import load_config
@@ -58,6 +56,20 @@ def _otlp_json_payload(
             },
         ],
     }
+
+
+def _otlp_protobuf_payload(span_name: str) -> bytes:
+    provider = TracerProvider(
+        resource=Resource.create({"service.name": "braintest-functional"}),
+    )
+    try:
+        tracer = provider.get_tracer("braintest-suite.functional-test")
+        with tracer.start_as_current_span(span_name) as span:
+            span.set_attribute("test.suite", "functionaltest")
+            span.set_status(Status(StatusCode.OK))
+        return encode_spans([span]).SerializeToString()
+    finally:
+        provider.shutdown()
 
 
 @dataclass
@@ -347,29 +359,34 @@ class FunctionalTestRunner:
             return
 
         for call, span_name, content_type, gzip_encoded in variants:
-            if content_type == "application/x-protobuf":
-                self._export_otlp_protobuf_trace(call, span_name, project_id, gzip_encoded)
-                continue
+            payload: dict[str, Any] | None = None
+            data: bytes | None = None
+            if content_type == "application/json":
+                start_time = time.time_ns()
+                end_time = time.time_ns()
+                trace_id = uuid.uuid4()
+                span_id = uuid.uuid4().bytes[:8]
+                payload = _otlp_json_payload(
+                    trace_id.hex,
+                    span_id.hex(),
+                    span_name,
+                    start_time,
+                    end_time,
+                )
+                if gzip_encoded:
+                    data = gzip.compress(json.dumps(payload, separators=(",", ":")).encode())
+                    payload = None
+            else:
+                data = _otlp_protobuf_payload(span_name)
+                if gzip_encoded:
+                    data = gzip.compress(data)
 
-            start_time = time.time_ns()
-            end_time = time.time_ns()
-            trace_id = uuid.uuid4()
-            span_id = uuid.uuid4().bytes[:8]
-            payload = _otlp_json_payload(
-                trace_id.hex,
-                span_id.hex(),
-                span_name,
-                start_time,
-                end_time,
-            )
-            data = gzip.compress(json.dumps(payload, separators=(",", ":")).encode()) if gzip_encoded else None
             headers = {
                 "Content-Type": content_type,
                 "x-bt-parent": f"project_id:{project_id}",
             }
             if gzip_encoded:
                 headers["Content-Encoding"] = "gzip"
-                payload = None
             self._call_api(
                 call=call,
                 method="POST",
@@ -378,55 +395,6 @@ class FunctionalTestRunner:
                 data=data,
                 headers=headers,
             )
-
-    def _export_otlp_protobuf_trace(
-        self,
-        call: str,
-        span_name: str,
-        project_id: str,
-        gzip_encoded: bool,
-    ) -> None:
-        exporter: OTLPSpanExporter | None = None
-        try:
-            exporter = OTLPSpanExporter(
-                endpoint=f"{self._api_base_url}/otel/v1/traces",
-                headers={
-                    "Authorization": self._headers["Authorization"],
-                    "x-bt-parent": f"project_id:{project_id}",
-                },
-                compression=Compression.Gzip if gzip_encoded else Compression.NoCompression,
-                timeout=30,
-            )
-            provider = TracerProvider(
-                resource=Resource.create({"service.name": "braintest-functional"}),
-            )
-            tracer = provider.get_tracer("braintest-suite.functional-test")
-            with tracer.start_as_current_span(span_name) as span:
-                span.set_attribute("test.suite", "functionaltest")
-                span.set_status(Status(StatusCode.OK))
-            result = exporter.export([span])
-            self._record(
-                call=call,
-                method="POST",
-                endpoint="/otel/v1/traces",
-                status="PASS" if result is SpanExportResult.SUCCESS else "FAIL",
-                status_code=None,
-                details=(
-                    "Exporter reported success" if result is SpanExportResult.SUCCESS else "Exporter reported failure"
-                ),
-            )
-        except Exception as exc:
-            self._record(
-                call=call,
-                method="POST",
-                endpoint="/otel/v1/traces",
-                status="FAIL",
-                status_code=None,
-                details=self._format_exception(exc),
-            )
-        finally:
-            if exporter is not None:
-                exporter.shutdown()
 
     def _create_and_read_role(self) -> None:
         payload: dict[str, Any] = {

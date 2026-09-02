@@ -11,6 +11,7 @@ from urllib.parse import urlencode
 import requests
 from dotenv import load_dotenv
 from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
+from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceResponse
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.trace import Status, StatusCode
@@ -70,6 +71,36 @@ def _otlp_protobuf_payload(span_name: str) -> bytes:
         return encode_spans([span]).SerializeToString()
     finally:
         provider.shutdown()
+
+
+def _otel_partial_success_error(content_type: str, body: dict[str, Any], response: requests.Response) -> str | None:
+    if content_type == "application/x-protobuf":
+        parsed = ExportTraceServiceResponse()
+        try:
+            parsed.ParseFromString(response.content or b"")
+        except Exception:
+            return "OTEL protobuf response could not be decoded"
+        rejected = parsed.partial_success.rejected_spans
+        error_message = parsed.partial_success.error_message
+    else:
+        partial = body.get("partialSuccess")
+        if partial is None:
+            partial = body.get("partial_success")
+        if not isinstance(partial, dict):
+            return None
+        raw_rejected = partial.get("rejectedSpans", partial.get("rejected_spans", 0))
+        try:
+            rejected = int(raw_rejected)
+        except (TypeError, ValueError):
+            return None
+        error_message = partial.get("errorMessage") or partial.get("error_message") or ""
+
+    if rejected <= 0:
+        return None
+    details = f"OTEL partialSuccess rejected {rejected} span(s)"
+    if error_message:
+        details = f"{details}: {error_message}"
+    return details[:200]
 
 
 @dataclass
@@ -394,6 +425,7 @@ class FunctionalTestRunner:
                 payload=payload,
                 data=data,
                 headers=headers,
+                validate=lambda body, response, ct=content_type: _otel_partial_success_error(ct, body, response),
             )
 
     def _create_and_read_role(self) -> None:
@@ -1259,6 +1291,7 @@ class FunctionalTestRunner:
         data: bytes | None = None,
         query_params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
+        validate: Callable[[dict[str, Any], requests.Response], str | None] | None = None,
     ) -> tuple[bool, dict[str, Any]]:
         query = query_params or {}
         filtered_query = {k: v for k, v in query.items() if v is not None}
@@ -1277,6 +1310,17 @@ class FunctionalTestRunner:
                 headers=self._headers | (headers or {}),
             )
             body = self._parse_json(response)
+            validation_error = validate(body, response) if validate else None
+            if validation_error:
+                self._record(
+                    call=call,
+                    method=method,
+                    endpoint=full_endpoint,
+                    status="FAIL",
+                    status_code=response.status_code,
+                    details=validation_error,
+                )
+                return False, body
             self._record(
                 call=call,
                 method=method,

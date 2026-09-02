@@ -154,6 +154,8 @@ class FunctionalTestRunner:
             self._create_and_read_project,
             self._upload_and_read_attachment,
             self._insert_and_fetch_project_logs,
+            self._insert_and_fetch_logs3,
+            self._insert_and_fetch_logs3_overflow,
             self._ingest_otel_trace,
             self._create_and_read_role,
             self._create_and_read_group,
@@ -662,6 +664,286 @@ class FunctionalTestRunner:
             endpoint=f"/v1/project_logs/{project_id}/fetch",
             query_params={"limit": 1},
         )
+
+    def _insert_and_fetch_logs3(self) -> None:
+        project_id = self._resource_ids.get("project_id")
+        if not project_id:
+            self._skip("Insert Logs3 event", "POST", "/logs3", "Missing project_id")
+            self._skip(
+                "Verify Logs3 event",
+                "GET",
+                "/v1/project_logs/{project_id}/fetch",
+                "Logs3 event was not inserted",
+            )
+            return
+
+        marker = self._unique_name("functional-logs3")
+        payload = self._logs3_payload(self._logs3_event(project_id, marker))
+        ok, _ = self._call_api(
+            call="Insert Logs3 event",
+            method="POST",
+            endpoint="/logs3",
+            payload=payload,
+        )
+        if not ok:
+            self._skip(
+                "Verify Logs3 event",
+                "GET",
+                "/v1/project_logs/{project_id}/fetch",
+                "Logs3 event insert failed",
+            )
+            return
+        self._wait_for_project_log(marker, "Verify Logs3 event")
+
+    def _insert_and_fetch_logs3_overflow(self) -> None:
+        project_id = self._resource_ids.get("project_id")
+        if not project_id:
+            self._skip("Request Logs3 overflow upload", "POST", "/logs3/overflow", "Missing project_id")
+            self._skip(
+                "Upload Logs3 overflow payload",
+                "N/A",
+                "signed upload URL",
+                "Logs3 overflow upload was not requested",
+            )
+            self._skip("Insert Logs3 overflow reference", "POST", "/logs3", "Logs3 overflow payload was not uploaded")
+            self._skip(
+                "Verify Logs3 overflow event",
+                "GET",
+                "/v1/project_logs/{project_id}/fetch",
+                "Logs3 overflow event was not inserted",
+            )
+            return
+
+        marker = self._unique_name("functional-logs3-overflow")
+        row = self._logs3_event(project_id, marker)
+        serialized_row = json.dumps(row, separators=(",", ":"))
+        payload = self._logs3_payload(row)
+        payload_bytes = len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+        overflow_rows = [
+            {
+                "object_ids": {"project_id": project_id, "log_id": "g"},
+                "has_comment": False,
+                "is_delete": False,
+                "input_row": {"byte_size": len(serialized_row.encode("utf-8"))},
+            }
+        ]
+        ok, upload = self._call_api(
+            call="Request Logs3 overflow upload",
+            method="POST",
+            endpoint="/logs3/overflow",
+            payload={
+                "content_type": "application/json",
+                "size_bytes": payload_bytes,
+                "rows": overflow_rows,
+            },
+        )
+        if not ok:
+            self._skip(
+                "Upload Logs3 overflow payload",
+                "N/A",
+                "signed upload URL",
+                "Logs3 overflow upload request failed",
+            )
+            self._skip(
+                "Insert Logs3 overflow reference",
+                "POST",
+                "/logs3",
+                "Logs3 overflow payload was not uploaded",
+            )
+            self._skip(
+                "Verify Logs3 overflow event",
+                "GET",
+                "/v1/project_logs/{project_id}/fetch",
+                "Logs3 overflow event was not inserted",
+            )
+            return
+
+        key = upload.get("key")
+        if not isinstance(key, str):
+            self._record(
+                call="Upload Logs3 overflow payload",
+                method="N/A",
+                endpoint="signed upload URL",
+                status="FAIL",
+                status_code=None,
+                details="Logs3 overflow response did not include a key",
+            )
+            self._skip(
+                "Insert Logs3 overflow reference",
+                "POST",
+                "/logs3",
+                "Logs3 overflow response did not include a key",
+            )
+            self._skip(
+                "Verify Logs3 overflow event",
+                "GET",
+                "/v1/project_logs/{project_id}/fetch",
+                "Logs3 overflow reference was not inserted",
+            )
+            return
+
+        if not self._upload_logs3_overflow_payload(upload, payload):
+            self._skip(
+                "Insert Logs3 overflow reference",
+                "POST",
+                "/logs3",
+                "Logs3 overflow payload upload failed",
+            )
+            self._skip(
+                "Verify Logs3 overflow event",
+                "GET",
+                "/v1/project_logs/{project_id}/fetch",
+                "Logs3 overflow event was not inserted",
+            )
+            return
+
+        ok, _ = self._call_api(
+            call="Insert Logs3 overflow reference",
+            method="POST",
+            endpoint="/logs3",
+            payload={"rows": {"type": "logs3_overflow", "key": key}, "api_version": 2},
+        )
+        if ok:
+            self._wait_for_project_log(marker, "Verify Logs3 overflow event")
+
+    @staticmethod
+    def _logs3_event(project_id: str, marker: str) -> dict[str, Any]:
+        now = time.time()
+        span_id = str(uuid.uuid4())
+        return {
+            "id": str(uuid.uuid4()),
+            "span_id": span_id,
+            "root_span_id": span_id,
+            "project_id": project_id,
+            "log_id": "g",
+            "input": {"message": marker},
+            "output": {"message": marker},
+            "metadata": {"suite": "functionaltest", "transport": "logs3"},
+            "span_attributes": {"name": "functional-logs3", "type": "eval"},
+            "metrics": {"start": now, "end": now},
+        }
+
+    @staticmethod
+    def _logs3_payload(row: dict[str, Any]) -> dict[str, Any]:
+        return {"rows": [row], "api_version": 2}
+
+    def _upload_logs3_overflow_payload(self, upload: dict[str, Any], payload: dict[str, Any]) -> bool:
+        method = upload.get("method")
+        signed_url = upload.get("signedUrl")
+        headers = upload.get("headers")
+        fields = upload.get("fields")
+        if method not in {"PUT", "POST"} or not isinstance(signed_url, str):
+            self._record(
+                call="Upload Logs3 overflow payload",
+                method=str(method or "N/A"),
+                endpoint="signed upload URL",
+                status="FAIL",
+                status_code=None,
+                details="Invalid Logs3 overflow upload response",
+            )
+            return False
+
+        has_valid_upload_parameters = (method == "PUT" and isinstance(headers, dict)) or (
+            method == "POST" and isinstance(fields, dict)
+        )
+        if not has_valid_upload_parameters:
+            self._record(
+                call="Upload Logs3 overflow payload",
+                method=method,
+                endpoint="signed upload URL",
+                status="FAIL",
+                status_code=None,
+                details="Invalid Logs3 overflow upload headers or fields",
+            )
+            return False
+
+        headers = headers if isinstance(headers, dict) else {}
+        fields = fields if isinstance(fields, dict) else {}
+
+        serialized_payload = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        try:
+            if method == "PUT":
+                response = requests.put(signed_url, headers=headers, data=serialized_payload, timeout=30)
+            else:
+                content_type = fields.get("Content-Type", "application/json")
+                upload_headers = {key: value for key, value in headers.items() if key.lower() != "content-type"}
+                response = requests.post(
+                    signed_url,
+                    headers=upload_headers,
+                    data=fields,
+                    files={"file": ("logs3.json", serialized_payload, content_type)},
+                    timeout=30,
+                )
+            response.raise_for_status()
+        except requests.exceptions.RequestException as exc:
+            response = getattr(exc, "response", None)
+            self._record(
+                call="Upload Logs3 overflow payload",
+                method=method,
+                endpoint="signed upload URL",
+                status="FAIL",
+                status_code=response.status_code if response is not None else None,
+                details=self._format_exception(exc),
+            )
+            return False
+
+        self._record(
+            call="Upload Logs3 overflow payload",
+            method=method,
+            endpoint="signed upload URL",
+            status="PASS",
+            status_code=response.status_code,
+            details="OK",
+        )
+        return True
+
+    def _wait_for_project_log(self, marker: str, call: str) -> None:
+        endpoint = f"/v1/project_logs/{self._resource_ids['project_id']}/fetch"
+        deadline = time.monotonic() + 30
+        last_error = ""
+        status_code = None
+
+        while time.monotonic() < deadline:
+            try:
+                response = http_client(
+                    method="GET",
+                    url=f"{self._api_base_url}{endpoint}?{urlencode({'limit': 100})}",
+                    headers=self._headers,
+                )
+                status_code = response.status_code
+                if self._contains_value(self._parse_json(response), marker):
+                    self._record(
+                        call=call,
+                        method="GET",
+                        endpoint=f"{endpoint}?limit=100",
+                        status="PASS",
+                        status_code=status_code,
+                        details="Event found",
+                    )
+                    return
+                last_error = "Event not present in fetch response"
+            except requests.exceptions.RequestException as exc:
+                response = getattr(exc, "response", None)
+                status_code = response.status_code if response is not None else None
+                last_error = self._format_exception(exc)
+            time.sleep(1)
+
+        self._record(
+            call=call,
+            method="GET",
+            endpoint=f"{endpoint}?limit=100",
+            status="FAIL",
+            status_code=status_code,
+            details=last_error or "Timed out waiting for event",
+        )
+
+    @staticmethod
+    def _contains_value(value: Any, expected: str) -> bool:
+        if isinstance(value, dict):
+            return any(FunctionalTestRunner._contains_value(item, expected) for item in value.values())
+        if isinstance(value, list):
+            return any(FunctionalTestRunner._contains_value(item, expected) for item in value)
+        return value == expected
 
     def _create_and_read_project_automation(self) -> None:
         project_id = self._resource_ids.get("project_id")

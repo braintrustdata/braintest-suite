@@ -15,6 +15,8 @@ This test validates core Braintrust API functionality with create/read coverage,
 - `POST /otel/v1/traces`, with an `x-bt-parent` project header, ingests OTLP JSON and Protobuf traces, each uncompressed and `Content-Encoding: gzip`.
 - `POST /v1/project_logs/{project_id}/insert` inserts project log events.
 - `GET /v1/project_logs/{project_id}/fetch` verifies project log events can be fetched.
+- `POST /logs3` inserts a Logs3 event and verifies its unique marker is returned by project-log fetch.
+- `POST /logs3/overflow` obtains an upload URL; the test uploads a Logs3 payload, submits its overflow reference to `POST /logs3`, and verifies its unique marker is returned by project-log fetch.
 - `POST /v1/role` creates a role.
 - `GET /v1/role/{role_id}` verifies the role can be read.
 - `POST /v1/group` creates a group.

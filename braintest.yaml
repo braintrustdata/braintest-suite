@@ -39,3 +39,17 @@ loadtest:
     html: True
     csv: False
     json: False
+
+# Repro: log root spans into a project with a 100% ExactMatch online scorer.
+# Not in `braintest run all`.
+asyncscorer:
+  project_name: async-scorer-loadtest
+  scorers:
+    - ExactMatch
+  flush_batch_size: 100 # spans per flush
+  headless: False
+  web_ui_port: 8090
+  processes: 1
+  peak_concurrency: 5 # in-flight flushes
+  ramp_up: 1
+  run_time: 5m

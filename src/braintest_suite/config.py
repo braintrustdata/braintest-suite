@@ -77,6 +77,18 @@ class LoadTestConfig(StrictBaseModel):
     logs: LogsConfig
 
 
+class AsyncScorerConfig(StrictBaseModel):
+    project_name: str = "async-scorer-loadtest"
+    scorers: list[str] = Field(default_factory=lambda: ["ExactMatch"])
+    flush_batch_size: int = 100
+    headless: bool = False
+    web_ui_port: int = 8090
+    processes: int = 1
+    peak_concurrency: int = 4
+    ramp_up: int = 1
+    run_time: str = "1m"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_nested_delimiter="__",
@@ -87,6 +99,7 @@ class Settings(BaseSettings):
     functionaltest: FunctionalTestConfig
     evaltest: EvalTestConfig
     loadtest: LoadTestConfig
+    asyncscorer: AsyncScorerConfig = Field(default_factory=AsyncScorerConfig)
 
     @classmethod
     def settings_customise_sources(cls, settings_cls, **kwargs):

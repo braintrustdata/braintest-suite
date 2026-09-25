@@ -15,7 +15,11 @@ AVAILABLE_SUITES = {
     "functional": "Functional API CRUD tests against Braintrust",
     "evaltest": "Evaluation test with synthetic dataset and scorers",
     "loadtest": "Locust-based load test with concurrent users",
+    "asyncscorer": "Log root spans into a project with a 100% online ExactMatch scorer",
 }
+
+# asyncscorer creates a project and continuously logs scored spans. Keep it out of `all`.
+SUITES_IN_ALL = ("functional", "evaltest", "loadtest")
 
 
 def _load_config() -> dict:
@@ -47,6 +51,11 @@ def _run_suite(name: str, config: dict) -> str:
     elif name == "loadtest":
         click.echo("\n-----Running Locust Load Test-----")
         from braintest_suite.loadtest import run as run_fn
+
+        return "SUCCESS" if run_fn(config) else "FAILED"
+    elif name == "asyncscorer":
+        click.echo("\n-----Running Async Scorer Load Test-----")
+        from braintest_suite.async_scorer import run as run_fn
 
         return "SUCCESS" if run_fn(config) else "FAILED"
     else:
@@ -98,6 +107,8 @@ def run_suites(ctx, config_file, suites):
 
         braintest run loadtest
 
+        braintest run asyncscorer
+
         braintest run --config-file custom.yaml loadtest
     """
     resolved_config = config_file or ctx.obj.get("config_file") or "braintest.yaml"
@@ -111,7 +122,7 @@ def run_suites(ctx, config_file, suites):
                 err=True,
             )
             sys.exit(1)
-        selected_suites = list(AVAILABLE_SUITES.keys())
+        selected_suites = list(SUITES_IN_ALL)
     else:
         invalid = [s for s in suites if s not in AVAILABLE_SUITES]
         if invalid:
@@ -143,7 +154,8 @@ def list_suites():
     """List available test suites."""
     click.echo("Available test suites:\n")
     for name, description in AVAILABLE_SUITES.items():
-        click.echo(f"  {name:<15} {description}")
+        suffix = "" if name in SUITES_IN_ALL else " (not included in 'all')"
+        click.echo(f"  {name:<15} {description}{suffix}")
 
 
 main = cli

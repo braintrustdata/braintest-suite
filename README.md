@@ -4,11 +4,12 @@ A load testing suite for running benchmarks on self-hosted Braintrust data plane
 
 ## Overview
 
-This suite currently supports three types of tests:
+This suite currently supports four types of tests:
 
 - **Functional Test** (`functional`): Exercises core API create/read/delete flows across key Braintrust resources
 - **Eval Test** (`evaltest`): Generates a large synthetic dataset and runs an eval against it
 - **Load Test** (`loadtest`): Spawns simulated users to bombard the data plane with logs, simulating production traffic
+- **Async scorer** (`asyncscorer`): Repro that logs root spans into a project with a 100% online ExactMatch scorer. Not in `braintest run all`. See [docs/async_scorer.md](docs/async_scorer.md).
 
 The suite can be extended to support additional test types in the future, and that is a goal.
 
@@ -61,6 +62,7 @@ braintest list
 braintest run functional
 braintest run functional evaltest
 braintest run loadtest
+braintest run asyncscorer
 braintest run all
 
 # Use a different config file
@@ -75,6 +77,7 @@ Each test suite is also runnable as a standalone Python module:
 python -m braintest_suite.functional_test
 python -m braintest_suite.evaltest
 python -m braintest_suite.loadtest
+python -m braintest_suite.async_scorer
 ```
 
 If you are running over SSH on a remote server, use `nohup` so the test keeps running if your session disconnects:
@@ -96,6 +99,7 @@ To override any config value via environment variable, use `__` (double undersco
 | `loadtest.processes` | `LOADTEST__PROCESSES` |
 | `evaltest.trial_count` | `EVALTEST__TRIAL_COUNT` |
 | `functionaltest.name_prefix` | `FUNCTIONALTEST__NAME_PREFIX` |
+| `asyncscorer.peak_concurrency` | `ASYNCSCORER__PEAK_CONCURRENCY` |
 
 Example:
 ```bash

@@ -75,9 +75,9 @@ RPS is a very good indicator of how the system is performing. It will be inverse
 
 ## Span Size and Payload Shape
 
-`max_tokens` is a control over span size.
+`loadtest.log_profile.options.max_tokens` is a control over generated payload size for the bundled profiles.
 
-Larger `max_tokens` values simulate larger LLM responses. When spans exceed the configured threshold in the mocked tasks, they are automatically converted into attachments instead of being logged inline.
+For the multi-turn profile, larger `max_tokens` values simulate larger LLM responses and oversized outputs are converted to attachments. For the PDF profile, it controls the approximate document length; PDFs are always logged as attachments.
 
 Operational implications:
 
@@ -85,9 +85,70 @@ Operational implications:
 - very large outputs are useful when you need to test attachment-heavy behavior
 - attachments are logged synchronously and separately from the Braintrust logger queue
 
-`faker_pool_size` controls how many synthetic responses are pre-generated for reuse.
+`loadtest.log_profile.options.faker_pool_size` controls how many synthetic responses or documents are pre-generated per worker for reuse.
 
 If your configured outputs are several MB in size, reduce `faker_pool_size` to lower memory consumption during the test run.
+
+## Custom Log Profiles
+
+The test suite ships with two default log profiles. Multiturn convo is the default, and simulates a multiturn chat conversation. The PDF processing profile simulates a document processing pipeline and leverages file attachments:
+
+- `braintest_suite.loadtest.log_profiles.default_multiturn_convo_profile:create_profile`
+- `braintest_suite.loadtest.log_profiles.pdf_processing_profile:create_profile`
+
+The PDF processing example uses the optional `pdf` dependency:
+
+```bash
+uv sync --extra pdf
+# Or for a single run:
+uv run --extra pdf braintest run loadtest
+```
+
+You can configure a fully custom log profile as well, to simulate trace shapes according to your application's pattern. The custom profile can be anything, as long as it implements the factory entrypoint contract. The factory should handle per-worker setup, such as faker response instantiation, and return the callable. Arbitrary config params can be defined via `log_profile.options` which can be parsed via the config object for dynamic profile configuration:
+
+```yaml
+loadtest:
+  log_profile:
+    callable: ./profiles/customer_profile.py:create_profile
+    options:
+      faker_pool_size: 20
+      max_tokens: 1000
+```
+
+The callable uses `<Python module or .py file>:<factory function>` syntax. Relative file paths are resolved from the directory containing `braintest.yaml`. The factory receives the complete validated configuration and must return a zero-argument callable:
+
+```python
+import random
+
+from braintrust import traced
+from faker import Faker
+
+
+fake = Faker()
+
+
+def create_profile(config):
+    options = config["loadtest"]["log_profile"]["options"]
+
+    # This setup runs once per executing Locust worker, before user tasks start.
+    response_pool = [
+        fake.paragraph(nb_sentences=max(1, options["max_tokens"] // 20))
+        for _ in range(options["faker_pool_size"])
+    ]
+
+    @traced(type="task")
+    def emit_trace():
+        response = random.choice(response_pool)
+        return {
+            "output": response,
+            "tool_call_probability": options["tool_call_probability"],
+        }
+
+    return emit_trace
+```
+
+The factory is initialized once in every executing worker and is not initialized in the Locust master. 
+Note: as is the pattern in the default profiles, Faker is used for fake text generation. This avoids making actual LLM calls. Faker text generation can exhaust CPU resources at scale if done on the hot path, so faker payloads should be pre-generated in the factory; the returned callable is the hot path and should select from the pre-generated pool rather than generating large payloads for each request.
 
 ## Queueing and Flushing
 
@@ -96,7 +157,7 @@ The Braintrust logger behavior is mainly shaped by:
 - `braintrust_logger.flush_size`
 - `braintrust_logger.queue_size`
 
-If you see an error like:
+If you see a console log like:
 
 ```text
 Dropped 1 elements due to full queue

@@ -16,6 +16,9 @@ dependencies = [
     "pyyaml>=6.0.3",
 ]
 
+[project.optional-dependencies]
+pdf = ["reportlab>=4.4.0"]
+
 [dependency-groups]
 dev = [
     "pre-commit>=4.2.0",

@@ -15,7 +15,10 @@ AVAILABLE_SUITES = {
     "functional": "Functional API CRUD tests against Braintrust",
     "evaltest": "Evaluation test with synthetic dataset and scorers",
     "loadtest": "Locust-based load test with concurrent users",
+    "smoketest": "Topics pipeline test with a disposable project",
 }
+
+DEFAULT_SUITES = ["functional", "evaltest", "loadtest"]
 
 
 def _load_config() -> dict:
@@ -47,6 +50,11 @@ def _run_suite(name: str, config: dict) -> str:
     elif name == "loadtest":
         click.echo("\n-----Running Locust Load Test-----")
         from braintest_suite.loadtest import run as run_fn
+
+        return "SUCCESS" if run_fn(config) else "FAILED"
+    elif name == "smoketest":
+        click.echo("\n-----Running Topics Smoke Test-----")
+        from braintest_suite.smoke_test import run as run_fn
 
         return "SUCCESS" if run_fn(config) else "FAILED"
     else:
@@ -111,7 +119,7 @@ def run_suites(ctx, config_file, suites):
                 err=True,
             )
             sys.exit(1)
-        selected_suites = list(AVAILABLE_SUITES.keys())
+        selected_suites = DEFAULT_SUITES
     else:
         invalid = [s for s in suites if s not in AVAILABLE_SUITES]
         if invalid:

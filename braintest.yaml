@@ -5,6 +5,24 @@ braintrust:
 functionaltest:
   name_prefix: functional-test # Prefix used when creating test resources
 
+smoketest:
+  org: null # Optional org name. If null, the script discovers it from BRAINTRUST_API_KEY.
+  api_url: null # Optional dataplane API URL override. If null, the script discovers it from BRAINTRUST_API_KEY.
+  project_prefix: topics-smoke # Created project names are suffixed with a UTC timestamp
+  count: 105 # Topics generation needs at least 100 facet summaries
+  idle_seconds: 10 # Minimum idle window before Topics processing runs
+  topic_window: 1h # Backfill window for Topics automation
+  generation_cadence: 1h # Topics automation rerun cadence
+  allow_below_threshold: False # Only set True when intentionally testing pre-generation behavior
+  skip_facet_preflight: False # Skip direct and async-batch preflight calls before bulk insert
+  skip_running_check: False # Skip polling for initial running or processed Topics rows
+  timeout: 60 # Generic API timeout in seconds
+  facet_preflight_timeout: 30 # Timeout for direct Topics preflight calls
+  function_visibility_timeout: 60 # Time to wait for saved function refs to resolve
+  function_visibility_interval: 2 # Poll interval for saved function visibility
+  running_check_timeout: 90 # Time to wait for Topics rows to start running or processing
+  running_check_interval: 3 # Poll interval for Topics status checks
+
 evaltest:
   project_id: null # if null or blank, will create a new project with name above
   name: test-large #Name for this eval

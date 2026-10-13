@@ -1,11 +1,8 @@
 import json
-import os
 import random
 
-from dotenv import load_dotenv
+from braintrust import JSONAttachment, current_span, start_span, traced
 from faker import Faker
-from braintrust import traced, current_span, start_span, JSONAttachment, init_logger
-from braintest_suite.config import load_config
 
 fake = Faker()
 
@@ -63,9 +60,6 @@ _TOOL_DEFINITIONS = [
 ]
 
 
-config = load_config()
-
-
 def _build_response_pool(pool_size: int, max_tokens: int) -> list:
     base_sentences = max_tokens // 20
     pool = []
@@ -80,14 +74,6 @@ def _build_response_pool(pool_size: int, max_tokens: int) -> list:
             }
         )
     return pool
-
-
-print("Building faker message response pool to optimize")
-_RESPONSE_POOL = _build_response_pool(
-    config["loadtest"]["params"]["faker_pool_size"],
-    config["loadtest"]["params"]["max_tokens"],
-)
-print("Pool generated")
 
 
 @traced(type="tool")
@@ -107,9 +93,7 @@ def _mock_tool_execution(tool_name: str, arguments: dict) -> dict:
         success = random.random() > 0.15
         return {
             "status": "success" if success else "error",
-            "output": "\n".join(fake.sentence() for _ in range(random.randint(1, 4)))
-            if success
-            else fake.sentence(),
+            "output": "\n".join(fake.sentence() for _ in range(random.randint(1, 4))) if success else fake.sentence(),
         }
     elif tool_name == "query_database":
         return {
@@ -132,7 +116,7 @@ def _mock_tool_execution(tool_name: str, arguments: dict) -> dict:
 
 
 @traced(type="llm", notrace_io=True)
-def _mock_llm_call(messages: list, tools: list | None = None) -> dict:
+def _mock_llm_call(messages: list, response_pool: list, tools: list | None = None) -> dict:
     span = current_span()
     should_call_tool = bool(tools) and random.random() > 0.5
     model = random.choice(["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"])
@@ -157,7 +141,7 @@ def _mock_llm_call(messages: list, tools: list | None = None) -> dict:
         finish_reason = "tool_calls"
         output_size = 0
     else:
-        pool_entry = random.choice(_RESPONSE_POOL)
+        pool_entry = random.choice(response_pool)
         assistant_message = {"role": "assistant", "content": pool_entry["content"]}
         finish_reason = "stop"
         output_size = pool_entry["output_size"]
@@ -178,16 +162,12 @@ def _mock_llm_call(messages: list, tools: list | None = None) -> dict:
     if output_size > MAX_SPAN_SIZE:
         span.log(
             input=messages,
-            output=JSONAttachment(
-                data=assistant_message, filename="completion.json", pretty=True
-            ),
+            output=JSONAttachment(data=assistant_message, filename="completion.json", pretty=True),
             metrics=metrics,
             metadata=metadata,
         )
     else:
-        span.log(
-            input=messages, output=assistant_message, metrics=metrics, metadata=metadata
-        )
+        span.log(input=messages, output=assistant_message, metrics=metrics, metadata=metadata)
 
     return {
         "id": f"chatcmpl-{fake.uuid4()[:8]}",
@@ -203,7 +183,7 @@ def _mock_llm_call(messages: list, tools: list | None = None) -> dict:
 
 
 @traced(type="task")
-def mock_multiturn_conversation(query: str) -> dict:
+def mock_multiturn_conversation(query: str, response_pool: list) -> dict:
     num_turns = random.choice([2, 4])
     system_message = {"role": "system", "content": "You are a helpful assistant."}
     current_user_message = {"role": "user", "content": query}
@@ -216,7 +196,7 @@ def mock_multiturn_conversation(query: str) -> dict:
             turn_span.log(input=current_user_message["content"])
 
             turn_context = [system_message, current_user_message]
-            completion = _mock_llm_call(turn_context, tools=_TOOL_DEFINITIONS)
+            completion = _mock_llm_call(turn_context, response_pool, tools=_TOOL_DEFINITIONS)
             assistant_message = completion["choices"][0]["message"]
             tool_calls = assistant_message.get("tool_calls")
 
@@ -233,7 +213,7 @@ def mock_multiturn_conversation(query: str) -> dict:
                             "content": json.dumps(tool_result),
                         }
                     )
-                follow_up = _mock_llm_call(follow_up_context)
+                follow_up = _mock_llm_call(follow_up_context, response_pool)
                 final_message = follow_up["choices"][0]["message"]
             else:
                 final_message = assistant_message
@@ -253,26 +233,49 @@ def mock_multiturn_conversation(query: str) -> dict:
     return {"output_size": len(final_content), "num_turns": num_turns}
 
 
-if __name__ == "__main__":
-    load_dotenv()
-
-    logger = init_logger(
-        project=config["braintrust"]["project_name"],
-        api_key=os.getenv("BRAINTRUST_API_KEY"),
-        async_flush=True,
+def create_profile(config: dict):
+    options = config["loadtest"]["log_profile"]["options"]
+    print("Building faker message response pool")
+    response_pool = _build_response_pool(
+        options["faker_pool_size"],
+        options["max_tokens"],
     )
+    print("Faker message response pool generated")
 
     query_templates = [
         lambda: fake.sentence(),
         lambda: f"How do I {fake.word()} {fake.word()}?",
         lambda: f"What is the {fake.word()} of {fake.word()}?",
         lambda: f"Explain {fake.catch_phrase()}",
+        lambda: f"Write code to {fake.word()} {fake.word()}",
+        lambda: f"Analyze {fake.word()} and provide {fake.word()}",
+        lambda: f"Compare {fake.word()} and {fake.word()}",
     ]
 
-    for i in range(3):
+    def emit_trace():
         query = random.choice(query_templates)()
-        print(f"\nRun {i + 1}: {query}")
-        result = mock_multiturn_conversation(query)
+        return mock_multiturn_conversation(query, response_pool)
+
+    return emit_trace
+
+
+if __name__ == "__main__":
+    from braintrust import init_logger
+    from dotenv import load_dotenv
+
+    from braintest_suite.config import load_config
+
+    load_dotenv()
+    standalone_config = load_config()
+    logger = init_logger(
+        project=standalone_config["braintrust"]["project_name"],
+        async_flush=True,
+    )
+    emit_trace = create_profile(standalone_config)
+
+    for i in range(3):
+        print(f"\nRun {i + 1}")
+        result = emit_trace()
         print(f"  turns={result['num_turns']}, output_size={result['output_size']}")
 
     logger.flush()

@@ -9,7 +9,7 @@ import sys
 import click
 from pydantic import ValidationError
 
-from braintest_suite.config import load_config
+from braintest_suite.config import CONFIG_FILE_ENV, DEFAULT_CONFIG_FILE, load_config
 
 AVAILABLE_SUITES = {
     "functional": "Functional API CRUD tests against Braintrust",
@@ -22,11 +22,11 @@ def _load_config() -> dict:
     try:
         return load_config()
     except FileNotFoundError:
-        config_file = os.environ.get("BRAINTEST_CONFIG_FILE", "braintest.yaml")
+        config_file = os.environ.get(CONFIG_FILE_ENV, DEFAULT_CONFIG_FILE)
         click.echo(f"Error: Configuration file not found: {config_file}", err=True)
         sys.exit(1)
     except ValidationError as exc:
-        config_file = os.environ.get("BRAINTEST_CONFIG_FILE", "braintest.yaml")
+        config_file = os.environ.get(CONFIG_FILE_ENV, DEFAULT_CONFIG_FILE)
         click.echo(f"Error: Invalid configuration in {config_file}", err=True)
         click.echo(str(exc), err=True)
         sys.exit(1)
@@ -100,8 +100,8 @@ def run_suites(ctx, config_file, suites):
 
         braintest run --config-file custom.yaml loadtest
     """
-    resolved_config = config_file or ctx.obj.get("config_file") or "braintest.yaml"
-    os.environ["BRAINTEST_CONFIG_FILE"] = resolved_config
+    resolved_config = config_file or ctx.obj.get("config_file") or DEFAULT_CONFIG_FILE
+    os.environ[CONFIG_FILE_ENV] = resolved_config
     click.echo(f'Using config file "{resolved_config}"')
 
     if "all" in suites:

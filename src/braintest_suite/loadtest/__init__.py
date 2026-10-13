@@ -11,6 +11,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from braintest_suite.config import resolve_config_path
+
 _DEFAULT_LOCUSTFILE = str(Path(__file__).resolve().parent / "run.py")
 
 
@@ -69,7 +71,11 @@ def run(config: dict) -> bool:
     else:
         cmd.extend(["--autostart", "--autoquit", "10"])
 
-    loadtest_env = {**os.environ, "PYTHONPATH": "."}
+    config_directory = str(resolve_config_path().parent)
+    python_paths = [config_directory, os.getcwd()]
+    if existing_pythonpath := os.environ.get("PYTHONPATH"):
+        python_paths.append(existing_pythonpath)
+    loadtest_env = {**os.environ, "PYTHONPATH": os.pathsep.join(python_paths)}
     if "flush_size" in bt_logger_config:
         loadtest_env["BRAINTRUST_DEFAULT_BATCH_SIZE"] = str(bt_logger_config["flush_size"])
     if "queue_size" in bt_logger_config:

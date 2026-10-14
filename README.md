@@ -9,7 +9,7 @@ This suite currently supports four types of tests:
 - **Functional Test** (`functional`): Exercises core API create/read/delete flows across key Braintrust resources
 - **Eval Test** (`evaltest`): Generates a large synthetic dataset and runs an eval against it
 - **Load Test** (`loadtest`): Spawns simulated users to bombard the data plane with logs, simulating production traffic
-- **Topics Smoke Test** (`smoketest`): Exercises the Topics pipeline on a disposable project with synthetic traces
+- **Topics Smoke Test** (`topics`): Exercises the Topics pipeline on a disposable project with synthetic traces
 
 The suite can be extended to support additional test types in the future, and that is a goal.
 
@@ -62,7 +62,7 @@ braintest list
 braintest run functional
 braintest run functional evaltest
 braintest run loadtest
-braintest run smoketest
+braintest run topics
 braintest run all
 
 # Use a different config file
@@ -77,7 +77,7 @@ Each test suite is also runnable as a standalone Python module:
 python -m braintest_suite.functional_test
 python -m braintest_suite.evaltest
 python -m braintest_suite.loadtest
-python -m braintest_suite.smoke_test --dry-run
+TOPICS__DRY_RUN=true braintest run topics
 ```
 
 If you are running over SSH on a remote server, use `nohup` so the test keeps running if your session disconnects:
@@ -99,22 +99,22 @@ To override any config value via environment variable, use `__` (double undersco
 | `loadtest.processes` | `LOADTEST__PROCESSES` |
 | `evaltest.trial_count` | `EVALTEST__TRIAL_COUNT` |
 | `functionaltest.name_prefix` | `FUNCTIONALTEST__NAME_PREFIX` |
-| `smoketest.count` | `SMOKETEST__COUNT` |
+| `topics.count` | `TOPICS__COUNT` |
 
 Example:
 ```bash
 BRAINTRUST__API_URL=https://my-api.example.com LOADTEST__PROCESSES=8 uv run braintest run loadtest
 ```
 
-The `all` selection excludes the Topics smoke test. The test creates a disposable project and uses model-backed Topics processing.
+The `all` selection includes the Topics smoke test and makes LLM calls. The test creates a disposable project and uses model-backed Topics processing.
 
 Run a local preview with this command:
 
 ```bash
-uv run python -m braintest_suite.smoke_test --dry-run
+TOPICS__DRY_RUN=true uv run braintest run topics
 ```
 
-Run the real test with `uv run braintest run smoketest`.
+Run the real test with `uv run braintest run topics`.
 
 ## Important Notes
 - Load, eval, and functional tests do not make actual LLM calls.

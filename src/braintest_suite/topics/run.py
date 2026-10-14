@@ -28,14 +28,24 @@ APP_URL = "https://www.braintrust.dev"
 DEFAULT_COUNT = 105
 MIN_TOPIC_SUMMARIES = 100
 DEFAULT_FACET = "Task"
+AUTOMATION_NAME = "Topics smoke"
 TOPIC_MAP_EMBEDDING_MODEL = "brain-embedding-1"
 DEFAULT_PROJECT_PREFIX = "topics-smoke"
 DEFAULT_TIMEOUT_SECONDS = 60
 DEFAULT_RUNNING_CHECK_TIMEOUT_SECONDS = 90
-DEFAULT_RUNNING_CHECK_INTERVAL_SECONDS = 3
+DEFAULT_RUNNING_CHECK_INTERVAL_SECONDS = 5
 DEFAULT_PREFLIGHT_TIMEOUT_SECONDS = 30
 DEFAULT_FUNCTION_VISIBILITY_TIMEOUT_SECONDS = 60
 DEFAULT_FUNCTION_VISIBILITY_INTERVAL_SECONDS = 2
+DEFAULT_COMPACTION_TIMEOUT_SECONDS = 300
+DEFAULT_COMPACTION_INTERVAL_SECONDS = 5
+DEFAULT_AUTOMATION_EXECUTION_TIMEOUT_SECONDS = 30
+DEFAULT_CLASSIFICATION_TIMEOUT_SECONDS = 900
+DEFAULT_CLASSIFICATION_INTERVAL_SECONDS = 5
+TOPIC_AUTOMATION_EXECUTION_PASSES = 2
+TOPIC_AUTOMATION_MAX_CONCURRENCY = 10
+PREFLIGHT_MAX_ATTEMPTS = 3
+PREFLIGHT_RETRY_SECONDS = 2
 
 
 class SmokeError(Exception):
@@ -87,8 +97,9 @@ def json_request(
     except HTTPError as exc:
         error_text = exc.read().decode("utf-8", errors="replace")
         raise SmokeError(f"{method} {url} failed with HTTP {exc.code}: {error_text}") from exc
-    except URLError as exc:
-        raise SmokeError(f"{method} {url} failed: {exc.reason}") from exc
+    except (URLError, TimeoutError) as exc:
+        reason = getattr(exc, "reason", str(exc))
+        raise SmokeError(f"{method} {url} failed: {reason}") from exc
 
     if not text:
         return None
@@ -101,14 +112,14 @@ def json_request(
 def require_api_key(args: argparse.Namespace) -> str:
     api_key = args.api_key or os.environ.get("BRAINTRUST_API_KEY")
     if not api_key:
-        raise SmokeError("BRAINTRUST_API_KEY or --api-key is required")
+        raise SmokeError("BRAINTRUST_API_KEY is required")
     return api_key
 
 
 def discover_auth(args: argparse.Namespace) -> AuthContext:
     api_key = require_api_key(args)
-    requested_org = args.org or os.environ.get("BRAINTRUST_ORG_NAME")
-    forced_api_url = args.api_url or os.environ.get("BRAINTRUST_API_URL")
+    requested_org = args.org or os.environ.get("TOPICS__ORG")
+    forced_api_url = args.api_url or os.environ.get("BRAINTRUST__API_URL")
 
     org_info: list[dict[str, Any]] = []
     discovery_error: SmokeError | None = None
@@ -127,8 +138,8 @@ def discover_auth(args: argparse.Namespace) -> AuthContext:
 
     if selected is None and discovery_error and not (forced_api_url and requested_org):
         raise SmokeError(
-            "Could not discover org/api_url from the API key. Provide --org and --api-url "
-            "or BRAINTRUST_ORG_NAME and BRAINTRUST_API_URL.\n"
+            "Could not discover org/api_url from the API key. Set topics.org and braintrust.api_url "
+            "or TOPICS__ORG and BRAINTRUST__API_URL.\n"
             f"Discovery error: {discovery_error}"
         )
 
@@ -142,9 +153,9 @@ def discover_auth(args: argparse.Namespace) -> AuthContext:
     api_url = (forced_api_url or selected.get("api_url") or "").rstrip("/")
     org_name = selected.get("name") or requested_org
     if not org_name:
-        raise SmokeError("Could not determine org. Provide --org or BRAINTRUST_ORG_NAME.")
+        raise SmokeError("Could not determine org. Set topics.org or TOPICS__ORG.")
     if not api_url:
-        raise SmokeError("Could not determine API URL. Provide --api-url or BRAINTRUST_API_URL.")
+        raise SmokeError("Could not determine API URL. Set braintrust.api_url or BRAINTRUST__API_URL.")
 
     return AuthContext(
         api_key=api_key,
@@ -167,7 +178,7 @@ def select_org(org_info: list[dict[str, Any]], requested_org: str | None) -> dic
         return org_info[0]
     names = ", ".join(str(org.get("name")) for org in org_info)
     raise SmokeError(
-        f"API key belongs to multiple organizations. Provide --org or BRAINTRUST_ORG_NAME. Available orgs: {names}"
+        f"API key belongs to multiple organizations. Set topics.org or TOPICS__ORG. Available orgs: {names}"
     )
 
 
@@ -203,6 +214,7 @@ def api_post(
     body: Any,
     *,
     extra_headers: dict[str, str] | None = None,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
 ) -> Any:
     return json_request(
         "POST",
@@ -211,8 +223,29 @@ def api_post(
         org_name=ctx.org_name,
         body=body,
         extra_headers=extra_headers,
-        timeout=DEFAULT_TIMEOUT_SECONDS,
+        timeout=timeout,
     )
+
+
+def preflight_api_post(
+    ctx: AuthContext,
+    path: str,
+    body: Any,
+    *,
+    extra_headers: dict[str, str] | None = None,
+) -> Any:
+    """Retry transient gateway failures for the small preflight requests."""
+    for attempt in range(1, PREFLIGHT_MAX_ATTEMPTS + 1):
+        try:
+            return api_post(ctx, path, body, extra_headers=extra_headers)
+        except SmokeError as exc:
+            message = str(exc)
+            transient = any(code in message for code in ("HTTP 502", "HTTP 503", "HTTP 504", "timed out"))
+            if not transient or attempt == PREFLIGHT_MAX_ATTEMPTS:
+                raise
+            print(f"Preflight request failed transiently; retrying ({attempt}/{PREFLIGHT_MAX_ATTEMPTS})")
+            time.sleep(PREFLIGHT_RETRY_SECONDS)
+    raise AssertionError("unreachable")
 
 
 def create_project(ctx: AuthContext, name: str) -> Project:
@@ -247,40 +280,13 @@ def list_topic_automations(ctx: AuthContext, project_id: str) -> list[dict[str, 
     return [row for row in rows if isinstance(row.get("config"), dict) and row["config"].get("event_type") == "topic"]
 
 
-def enable_topics(ctx: AuthContext, project: Project, args: argparse.Namespace) -> dict[str, Any]:
-    existing = list_topic_automations(ctx, project.id)
-    if existing:
-        raise SmokeError(
-            f"Project {project.name!r} already has {len(existing)} Topics automation(s); "
-            "fresh smoke projects should start empty."
-        )
-
-    facet_names, facet_functions, topic_map_functions = create_topic_function_refs(
-        ctx,
-        project.id,
-    )
-    return register_topics_automation(
-        ctx,
-        project,
-        args,
-        facet_functions=facet_functions,
-        topic_map_functions=topic_map_functions,
-    )
-
-
 def create_topic_function_refs(
     ctx: AuthContext,
     project_id: str,
-) -> tuple[list[str], list[dict[str, Any]], list[dict[str, Any]]]:
-    facet_names = [DEFAULT_FACET]
-    facet_functions = [{"type": "global", "name": DEFAULT_FACET, "function_type": "facet"}]
-    topic_map_functions = create_topic_map_functions(
-        ctx,
-        project_id,
-        facet_names,
-        facet_functions,
-    )
-    return facet_names, facet_functions, topic_map_functions
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    facet_function = {"type": "global", "name": DEFAULT_FACET, "function_type": "facet"}
+    topic_map_function = create_topic_map_function(ctx, project_id, facet_function)
+    return facet_function, topic_map_function
 
 
 def register_topics_automation(
@@ -288,18 +294,18 @@ def register_topics_automation(
     project: Project,
     args: argparse.Namespace,
     *,
-    facet_functions: list[dict[str, Any]],
-    topic_map_functions: list[dict[str, Any]],
+    facet_function: dict[str, Any],
+    topic_map_function: dict[str, Any],
 ) -> dict[str, Any]:
     body = {
-        "project_automation_name": "Topics smoke",
+        "project_automation_name": AUTOMATION_NAME,
         "description": "Minimal disposable Topics smoke-test automation",
         "project_id": project.id,
         "config": {
             "event_type": "topic",
             "sampling_rate": 1.0,
-            "facet_functions": facet_functions,
-            "topic_map_functions": topic_map_functions,
+            "facet_functions": [facet_function],
+            "topic_map_functions": [topic_map_function],
             "scope": {"type": "trace", "idle_seconds": args.idle_seconds},
             "rerun_seconds": args.generation_cadence_seconds,
             "backfill_time_range": format_duration_seconds(args.topic_window_seconds),
@@ -312,48 +318,36 @@ def register_topics_automation(
     return automation
 
 
-def create_topic_map_functions(
+def create_topic_map_function(
     ctx: AuthContext,
     project_id: str,
-    facet_names: list[str],
-    facet_functions: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
+    facet_function: dict[str, Any],
+) -> dict[str, Any]:
     body = {
         "functions": [
             {
                 "project_id": project_id,
-                "name": facet,
-                "slug": slugify_topic_map_name(f"{facet}-topic-map"),
+                "name": DEFAULT_FACET,
+                "slug": slugify_topic_map_name(f"{DEFAULT_FACET}-topic-map"),
                 "function_type": "classifier",
                 "function_data": {
                     "type": "topic_map",
-                    "source_facet": facet,
+                    "source_facet": DEFAULT_FACET,
                     "source_facet_function": facet_function,
                     "embedding_model": TOPIC_MAP_EMBEDDING_MODEL,
                 },
                 "if_exists": "ignore",
             }
-            for facet, facet_function in zip(facet_names, facet_functions, strict=True)
         ]
     }
     response = api_post(ctx, "/insert-functions", body)
     functions = response.get("functions") or []
-    if len(functions) != len(facet_names):
-        raise SmokeError("Failed to create the expected topic map functions")
-    return [
-        {"function": saved_function_ref_from_inserted_function(function_row, response)} for function_row in functions
-    ]
-
-
-def saved_function_ref_from_inserted_function(
-    function_row: dict[str, Any],
-    response: dict[str, Any],
-) -> dict[str, str]:
-    ref = {"type": "function", "id": str(function_row["id"])}
-    version = function_row.get("_xact_id") or function_row.get("version") or response.get("xact_id")
-    if version is not None:
-        ref["version"] = str(version)
-    return ref
+    if len(functions) != 1:
+        raise SmokeError("Failed to create the topic map function")
+    # Topic generation creates new versions of these functions. Keep the
+    # automation reference unversioned so classification resolves the newly
+    # generated current version rather than the empty bootstrap version.
+    return {"function": {"type": "function", "id": str(functions[0]["id"])}}
 
 
 def saved_function_ref_to_use_body(function_ref: dict[str, Any]) -> dict[str, Any]:
@@ -379,20 +373,16 @@ def saved_function_ref_to_use_body(function_ref: dict[str, Any]) -> dict[str, An
 def verify_function_refs_resolve(
     ctx: AuthContext,
     project_id: str,
-    facet_functions: list[dict[str, Any]],
-    topic_map_functions: list[dict[str, Any]],
+    facet_function: dict[str, Any],
+    topic_map_function: dict[str, Any],
     *,
     timeout_seconds: int,
     interval_seconds: int,
 ) -> None:
-    refs: list[tuple[str, dict[str, Any], str]] = []
-    for ref in facet_functions:
-        refs.append(("facet", ref, "facet"))
-    for entry in topic_map_functions:
-        ref = entry.get("function")
-        if not isinstance(ref, dict):
-            raise SmokeError(f"topic map entry is missing function reference: {entry!r}")
-        refs.append(("topic map", ref, "topic_map"))
+    refs = [
+        ("facet", facet_function, "facet"),
+        ("topic map", topic_map_function["function"], "topic_map"),
+    ]
 
     deadline = time.monotonic() + timeout_seconds
     last_error: str | None = None
@@ -434,7 +424,32 @@ def seed_topic_automation_cursors(
     config = automation.get("config") or {}
     object_id = topic_automation_object_id(project_id, config.get("data_scope"))
     start_xact_id = inclusive_start_xact_id_from_epoch_ms(int(time.time() * 1000) - window_seconds * 1000)
+    api_post(
+        ctx,
+        "/brainstore/automation/reset-cursors",
+        {
+            "automation_id": automation_id,
+            "object_id": object_id,
+            "start_xact_id": start_xact_id,
+        },
+    )
     poke_topic_automation(ctx, automation_id, object_id)
+
+
+def poke_topic_automation(ctx: AuthContext, automation_id: str, object_id: str) -> None:
+    api_post(
+        ctx,
+        "/brainstore/automation/upsert-object-cursor",
+        {"automation_id": automation_id, "object_id": object_id},
+    )
+
+
+def reset_topic_automation_cursor(
+    ctx: AuthContext,
+    automation_id: str,
+    object_id: str,
+    start_xact_id: str,
+) -> None:
     api_post(
         ctx,
         "/brainstore/automation/reset-cursors",
@@ -446,27 +461,133 @@ def seed_topic_automation_cursors(
     )
 
 
-def poke_topic_automation(ctx: AuthContext, automation_id: str, object_id: str) -> None:
-    api_post(
-        ctx,
-        "/brainstore/automation/upsert-object-cursor",
-        {"automation_id": automation_id, "object_id": object_id},
+def start_topic_classification_backfill(
+    ctx: AuthContext,
+    project: Project,
+    automation: dict[str, Any],
+    start_xact_id: str,
+) -> None:
+    """Rewind and queue the original automation for generated-map backfill."""
+    automation_id = str(automation["id"])
+    object_id = topic_automation_object_id(
+        project.id,
+        (automation.get("config") or {}).get("data_scope"),
     )
+    reset_topic_automation_cursor(ctx, automation_id, object_id, start_xact_id)
+    try:
+        poke_topic_automation(ctx, automation_id, object_id)
+    except SmokeError as exc:
+        if not is_transient_api_error(exc):
+            raise
+        print("Classification backfill was rewound; requeue will be retried while polling")
+
+
+def is_transient_api_error(exc: SmokeError) -> bool:
+    message = str(exc)
+    return any(
+        marker in message
+        for marker in ("HTTP 500", "HTTP 502", "HTTP 503", "HTTP 504", "timed out", "temporarily unavailable")
+    )
+
+
+def execute_topic_automation(
+    ctx: AuthContext,
+    project_id: str,
+    automation: dict[str, Any],
+    *,
+    timeout_seconds: int = DEFAULT_AUTOMATION_EXECUTION_TIMEOUT_SECONDS,
+) -> dict[str, int]:
+    """Explicitly process the facet replay instead of waiting for the background worker."""
+    totals = {"successful": 0, "failed": 0, "rows_matched": 0}
+    for _ in range(TOPIC_AUTOMATION_EXECUTION_PASSES):
+        try:
+            response = api_post(
+                ctx,
+                "/brainstore/automation/execute",
+                {
+                    "automation_id": str(automation["id"]),
+                    "project_id": project_id,
+                    "max_concurrency": TOPIC_AUTOMATION_MAX_CONCURRENCY,
+                },
+                timeout=timeout_seconds,
+            )
+        except SmokeError as exc:
+            message = str(exc)
+            if "timed out" in message or "HTTP 504" in message:
+                print("Topics execution is still running server-side; polling its results")
+                break
+            raise
+        for key in totals:
+            totals[key] += read_count(response, key)
+    if totals["failed"]:
+        raise SmokeError(f"Topics automation execution reported failures: {totals}")
+    return totals
+
+
+def wait_for_trace_idle(inserted_at: float, idle_seconds: int) -> None:
+    """Wait until newly ingested traces are eligible for trace-scoped automation."""
+    remaining = idle_seconds + 1 - (time.monotonic() - inserted_at)
+    if remaining <= 0:
+        return
+    print(f"Waiting {remaining:.1f}s for inserted traces to pass the Topics idle window")
+    time.sleep(remaining)
 
 
 def insert_smoke_traces(ctx: AuthContext, project: Project, events: list[dict[str, Any]]) -> Any:
     return api_post(ctx, f"/v1/project_logs/{quote(project.id, safe='')}/insert", {"events": events})
 
 
-def format_function_refs(function_refs: list[dict[str, Any]]) -> str:
-    return ", ".join(str(ref.get("id")) for ref in function_refs) or "(none)"
-
-
-def format_topic_map_refs(topic_map_refs: list[dict[str, Any]]) -> str:
-    ids = [
-        str((ref.get("function") or {}).get("id")) for ref in topic_map_refs if isinstance(ref.get("function"), dict)
-    ]
-    return ", ".join(ids) or "(none)"
+def wait_for_compacted_traces(
+    ctx: AuthContext,
+    project: Project,
+    run_id: str,
+    expected: int,
+    *,
+    timeout_seconds: int,
+    interval_seconds: int,
+) -> None:
+    """Wait until replay can see every synthetic trace in compacted Brainstore data."""
+    deadline = time.monotonic() + timeout_seconds
+    last_count = 0
+    last_error: SmokeError | None = None
+    query = (
+        f"from: project_logs('{escape_btql_literal(project.id)}') spans | "
+        "measures: count(1) as count | "
+        f"filter: metadata.run_id = '{escape_btql_literal(run_id)}'"
+    )
+    print(f"Waiting for {expected} synthetic trace(s) to become replayable...")
+    while True:
+        try:
+            response = api_post(
+                ctx,
+                "/btql",
+                {
+                    "query": query,
+                    "fmt": "json",
+                    "use_brainstore": True,
+                    "brainstore_realtime": False,
+                    "brainstore_ephemeral_wal": False,
+                    "use_columnstore": True,
+                    "api_version": 1,
+                    "query_source": "topics-smoke-compaction-check",
+                },
+            )
+            row = (response.get("data") or [{}])[0]
+            count = read_count(row, "count")
+            if count != last_count:
+                print(f"Compacted synthetic traces: {count}/{expected}")
+            last_count = count
+            last_error = None
+            if count >= expected:
+                return
+        except SmokeError as exc:
+            last_error = exc
+        if time.monotonic() >= deadline:
+            error_note = f" Last query error: {last_error}" if last_error else ""
+            raise SmokeError(
+                f"Timed out waiting for synthetic traces to become replayable: {last_count}/{expected}.{error_note}"
+            )
+        time.sleep(interval_seconds)
 
 
 def build_trace_events(count: int, *, project_name: str, run_id: str) -> list[dict[str, Any]]:
@@ -488,7 +609,7 @@ def build_trace_events(count: int, *, project_name: str, run_id: str) -> list[di
                 "input": [{"role": "user", "content": user_message}],
                 "output": [{"role": "assistant", "content": assistant_message}],
                 "metadata": {
-                    "source": "braintest_suite.smoke_test",
+                    "source": "braintest_suite.topics",
                     "run_id": run_id,
                     "project_name": project_name,
                     "scenario": scenario["name"],
@@ -589,17 +710,17 @@ def run_create(args: argparse.Namespace) -> int:
             f"Project {project.name!r} already has {len(existing)} Topics automation(s); "
             "fresh smoke projects should start empty."
         )
-    facet_names, facet_functions, topic_map_functions = create_topic_function_refs(
+    facet_function, topic_map_function = create_topic_function_refs(
         ctx,
         project.id,
     )
     print(f"Using built-in Topics facet: {DEFAULT_FACET}")
-    print(f"Created topic map function(s): {format_topic_map_refs(topic_map_functions)}")
+    print(f"Created topic map function: {topic_map_function['function']['id']}")
     verify_function_refs_resolve(
         ctx,
         project.id,
-        facet_functions,
-        topic_map_functions,
+        facet_function,
+        topic_map_function,
         timeout_seconds=args.function_visibility_timeout,
         interval_seconds=args.function_visibility_interval,
     )
@@ -615,25 +736,64 @@ def run_create(args: argparse.Namespace) -> int:
             project,
             events[0],
             args,
-            facet_names,
-            facet_functions,
+            facet_function,
         )
         remaining_events = events[1:]
         if remaining_events:
             insert_smoke_traces(ctx, project, remaining_events)
         print(f"Inserted {len(events)} synthetic trace(s)")
+    inserted_at = time.monotonic()
+    wait_for_compacted_traces(
+        ctx,
+        project,
+        run_id,
+        len(events),
+        timeout_seconds=args.compaction_timeout,
+        interval_seconds=args.compaction_interval,
+    )
 
     automation = register_topics_automation(
         ctx,
         project,
         args,
-        facet_functions=facet_functions,
-        topic_map_functions=topic_map_functions,
+        facet_function=facet_function,
+        topic_map_function=topic_map_function,
     )
     print(f"Enabled Topics automation: {automation.get('name', 'Topics')} ({automation['id']})")
-    print("Queued Topics processing")
+    wait_for_trace_idle(inserted_at, args.idle_seconds)
+    execution = execute_topic_automation(
+        ctx,
+        project.id,
+        automation,
+        timeout_seconds=args.automation_execution_timeout,
+    )
+    print(
+        "Executed queued Topics processing: "
+        f"successful={execution['successful']} failed={execution['failed']} "
+        f"rows_matched={execution['rows_matched']}"
+    )
     if not args.skip_running_check:
-        verify_expected_running(ctx, project, automation, [DEFAULT_FACET], args)
+        verify_expected_running(ctx, project, automation, args)
+        topic_map_function_id = str(topic_map_function["function"]["id"])
+        generated_version, classification_start_xact_id = wait_for_generated_topic_map(
+            ctx,
+            project,
+            automation,
+            topic_map_function_id,
+            args,
+        )
+        print(f"Generated topic map version: {generated_version}")
+        wait_for_compacted_facet_outputs(
+            ctx,
+            project,
+            str(automation.get("name") or AUTOMATION_NAME),
+            DEFAULT_FACET,
+            min(args.count, MIN_TOPIC_SUMMARIES),
+            timeout_seconds=args.classification_timeout,
+            interval_seconds=args.classification_interval,
+        )
+        start_topic_classification_backfill(ctx, project, automation, classification_start_xact_id)
+        wait_for_topic_classifications(ctx, project, automation, DEFAULT_FACET, args)
     print(f"Project name for status checks: {project.name}")
     topics_url = app_project_topics_url(ctx.org_name, project.name)
     print(f"Open Topics results: {terminal_hyperlink('Topics results', topics_url)}")
@@ -651,20 +811,20 @@ def preview_auth(args: argparse.Namespace) -> dict[str, str | None]:
             }
         except SmokeError as exc:
             return {
-                "org": args.org or os.environ.get("BRAINTRUST_ORG_NAME"),
-                "api_url": args.api_url or os.environ.get("BRAINTRUST_API_URL"),
+                "org": args.org or os.environ.get("TOPICS__ORG"),
+                "api_url": args.api_url or os.environ.get("BRAINTRUST__API_URL"),
                 "note": f"No project, traces, or automations were created. Discovery failed: {exc}",
             }
     return {
-        "org": args.org or os.environ.get("BRAINTRUST_ORG_NAME"),
-        "api_url": args.api_url or os.environ.get("BRAINTRUST_API_URL"),
+        "org": args.org or os.environ.get("TOPICS__ORG"),
+        "api_url": args.api_url or os.environ.get("BRAINTRUST__API_URL"),
         "note": "No network calls were made because no API key was provided.",
     }
 
 
 def run_status(args: argparse.Namespace) -> int:
     if not args.project:
-        raise SmokeError("status requires --project <created-project-name>")
+        raise SmokeError("status requires a project name: braintest status topics <project-name>")
     ctx = discover_auth(args)
     project = get_project_by_name(ctx, args.project)
     if project is None:
@@ -684,9 +844,23 @@ def run_status(args: argparse.Namespace) -> int:
             "/brainstore/automation/get-object-cursors",
             {"automation_id": automation_id, "project_id": project.id},
         )
+        facet_counts = get_topic_facet_status_counts(
+            ctx,
+            project.id,
+            automation_id,
+            DEFAULT_FACET,
+            facet_function_key(automation),
+        )
+        segment_cursor = api_post(
+            ctx,
+            "/brainstore/automation/get-cursors",
+            {"automation_id": automation_id, "project_id": project.id},
+        )
         summary["automations"].append(
             {
                 "id": automation_id,
+                "facet_counts": facet_counts,
+                "segment_cursor": segment_cursor,
                 "name": automation.get("name", "Topics"),
                 "object_id": object_id,
                 "next_run_at": object_cursor.get("next_run_at"),
@@ -704,20 +878,14 @@ def preflight_topics_pipeline(
     project: Project,
     event: dict[str, Any],
     args: argparse.Namespace,
-    facets: list[str],
-    facet_functions: list[dict[str, Any]],
+    facet_function: dict[str, Any],
 ) -> None:
-    if len(facets) != 1:
-        print("Skipping facet preflight because multiple facets were configured")
-        return
-
-    facet = facets[0]
     root_span_id = str(event["root_span_id"])
     saved_body = {
         "api_version": 1,
         "project_id": project.id,
         "org_name": ctx.org_name,
-        **saved_function_ref_to_use_body(facet_functions[0]),
+        **saved_function_ref_to_use_body(facet_function),
         "input": {
             "trace_ref": {
                 "object_type": "project_logs",
@@ -728,12 +896,12 @@ def preflight_topics_pipeline(
         "stream": False,
         "timeout_ms": args.facet_preflight_timeout * 1000,
     }
-    saved_response = api_post(ctx, "/function/invoke", saved_body)
+    saved_response = preflight_api_post(ctx, "/function/invoke", saved_body)
     if saved_response is None:
-        raise SmokeError(f"Saved facet preflight for {facet!r} returned no response")
-    print(f"Saved facet preflight succeeded for {facet!r}")
+        raise SmokeError(f"Saved facet preflight for {DEFAULT_FACET!r} returned no response")
+    print(f"Saved facet preflight succeeded for {DEFAULT_FACET!r}")
 
-    async_batch_response = api_post(
+    async_batch_response = preflight_api_post(
         ctx,
         "/function/invoke-async-batch",
         [{"request": saved_body}],
@@ -743,58 +911,246 @@ def preflight_topics_pipeline(
         raise SmokeError(
             f"Async-batch gateway preflight failed before bulk trace insert. Response: {async_batch_response!r}"
         )
-    print(f"Async-batch saved-facet preflight succeeded for {facet!r}")
+    print(f"Async-batch saved-facet preflight succeeded for {DEFAULT_FACET!r}")
 
 
 def verify_expected_running(
     ctx: AuthContext,
     project: Project,
     automation: dict[str, Any],
-    facets: list[str],
     args: argparse.Namespace,
 ) -> None:
-    if len(facets) != 1:
-        print("Skipping running-count check because multiple facets were configured")
-        return
-
-    facet = facets[0]
-    expected = args.count
+    expected = min(args.count, MIN_TOPIC_SUMMARIES)
     deadline = time.monotonic() + args.running_check_timeout
     last_counts: dict[str, int] | None = None
-    function_keys = facet_function_keys_for_running_check(automation, facets)
-    print(f"Waiting for Topics facet {facet!r} to show {expected} running or processed trace(s)...")
+    function_key = facet_function_key(automation)
+    print(f"Waiting for Topics facet {DEFAULT_FACET!r} to process {expected} trace(s)...")
     while True:
         counts = get_topic_facet_status_counts(
             ctx,
             project.id,
             str(automation["id"]),
-            facet,
-            function_keys,
+            DEFAULT_FACET,
+            function_key,
         )
         last_counts = counts
         running = counts["running"]
         errors = counts["errors"]
         processed = counts["processed"]
         matched = counts["matched"]
-        print(f"Facet {facet}: matched={matched} processed={processed} running={running} errors={errors}")
-        if errors == 0 and (running >= expected or processed >= expected):
-            if processed >= expected:
-                print(f"Verified Topics processed count: {processed}")
-            else:
-                print(f"Verified Topics running count: {running}")
+        print(f"Facet {DEFAULT_FACET}: matched={matched} processed={processed} running={running} errors={errors}")
+        if errors == 0 and processed >= expected:
+            print(f"Verified Topics processed count: {processed}")
             return
         if errors >= expected:
             raise SmokeError(
-                f"Topics facet {facet!r} reported {errors} error(s), which is at or above "
+                f"Topics facet {DEFAULT_FACET!r} reported {errors} error(s), which is at or above "
                 f"the expected {expected} trace(s). Last counts: {last_counts}"
             )
         if time.monotonic() >= deadline:
             error_note = f"; last reported errors={errors}" if errors > 0 else ""
             raise SmokeError(
-                f"Timed out waiting for Topics facet {facet!r} to reach {expected} running or processed "
+                f"Timed out waiting for Topics facet {DEFAULT_FACET!r} to process {expected} "
                 f"trace(s){error_note}. Last counts: {last_counts}"
             )
+        execute_topic_automation(
+            ctx,
+            project.id,
+            automation,
+            timeout_seconds=args.automation_execution_timeout,
+        )
         time.sleep(args.running_check_interval)
+
+
+def get_topic_classification_count(
+    ctx: AuthContext,
+    project_id: str,
+    facet: str,
+    automation_name: str,
+) -> int:
+    """Count traces classified by the automation under test."""
+    facet_path = quote_btql_path_piece(facet)
+    query = (
+        f"from: project_logs('{escape_btql_literal(project_id)}') spans | "
+        f"measures: count(classifications.{facet_path}) as count | "
+        f"filter: classifications.{facet_path} is not null "
+        "AND span_attributes.type = 'automation' "
+        f"AND name = '{escape_btql_literal(automation_name)}'"
+    )
+    response = api_post(
+        ctx,
+        "/btql",
+        {
+            "query": query,
+            "fmt": "json",
+            "use_brainstore": True,
+            "api_version": 1,
+            "query_source": "topics-smoke-classification-check",
+        },
+    )
+    row = (response.get("data") or [{}])[0]
+    return read_count(row, "count")
+
+
+def wait_for_compacted_facet_outputs(
+    ctx: AuthContext,
+    project: Project,
+    automation_name: str,
+    facet: str,
+    expected: int,
+    *,
+    timeout_seconds: int,
+    interval_seconds: int,
+) -> None:
+    """Wait until classification replay can read the completed facet outputs."""
+    deadline = time.monotonic() + timeout_seconds
+    facet_path = quote_btql_path_piece(facet)
+    query = (
+        f"from: project_logs('{escape_btql_literal(project.id)}') spans | "
+        f"measures: count(facets.{facet_path}) as count | "
+        f"filter: facets.{facet_path} is not null "
+        "AND span_attributes.type = 'automation' "
+        f"AND name = '{escape_btql_literal(automation_name)}'"
+    )
+    last_count = 0
+    last_error: SmokeError | None = None
+    print(f"Waiting for {expected} facet output(s) to become replayable for classification...")
+    while True:
+        try:
+            response = api_post(
+                ctx,
+                "/btql",
+                {
+                    "query": query,
+                    "fmt": "json",
+                    "use_brainstore": True,
+                    "brainstore_realtime": False,
+                    "brainstore_ephemeral_wal": False,
+                    "brainstore_skip_backfill_check": False,
+                    "use_columnstore": True,
+                    "api_version": 1,
+                    "query_source": "topics-smoke-facet-compaction-check",
+                },
+            )
+            row = (response.get("data") or [{}])[0]
+            count = read_count(row, "count")
+            if count != last_count:
+                print(f"Compacted facet outputs: {count}/{expected}")
+            last_count = count
+            last_error = None
+            if count >= expected:
+                return
+        except SmokeError as exc:
+            last_error = exc
+        if time.monotonic() >= deadline:
+            error_note = f" Last query error: {last_error}" if last_error else ""
+            raise SmokeError(
+                "Timed out waiting for facet outputs to become replayable for "
+                f"classification: {last_count}/{expected}.{error_note}"
+            )
+        time.sleep(interval_seconds)
+
+
+def wait_for_topic_classifications(
+    ctx: AuthContext,
+    project: Project,
+    automation: dict[str, Any],
+    facet: str,
+    args: argparse.Namespace,
+) -> None:
+    """Drive topic generation/backfill until the synthetic traces are classified."""
+    expected = min(args.count, MIN_TOPIC_SUMMARIES)
+    deadline = time.monotonic() + args.classification_timeout
+    last_count = 0
+    last_error: SmokeError | None = None
+    automation_id = str(automation["id"])
+    object_id = topic_automation_object_id(project.id, (automation.get("config") or {}).get("data_scope"))
+    print(f"Waiting for Topics classification {facet!r} on {expected} trace(s)...")
+
+    while True:
+        try:
+            count = get_topic_classification_count(
+                ctx,
+                project.id,
+                facet,
+                str(automation.get("name") or AUTOMATION_NAME),
+            )
+            last_count = count
+            last_error = None
+            if count >= expected:
+                print(f"Verified Topics classification count: {count}")
+                return
+
+            poke_topic_automation(ctx, automation_id, object_id)
+            execution = execute_topic_automation(
+                ctx,
+                project.id,
+                automation,
+                timeout_seconds=args.automation_execution_timeout,
+            )
+            print(f"Classification {facet}: classified={count}/{expected} rows_matched={execution['rows_matched']}")
+        except SmokeError as exc:
+            last_error = exc
+            print(f"Topics classification check is not ready: {exc}")
+
+        if time.monotonic() >= deadline:
+            error_note = f" Last execution/query error: {last_error}" if last_error else ""
+            raise SmokeError(
+                f"Timed out waiting for Topics classification {facet!r}: "
+                f"{last_count}/{expected} classified.{error_note}"
+            )
+        time.sleep(args.classification_interval)
+
+
+def wait_for_generated_topic_map(
+    ctx: AuthContext,
+    project: Project,
+    automation: dict[str, Any],
+    topic_map_function_id: str,
+    args: argparse.Namespace,
+) -> tuple[str, str]:
+    """Drive object work until Topics publishes a generated map version."""
+    deadline = time.monotonic() + args.classification_timeout
+    automation_id = str(automation["id"])
+    object_id = topic_automation_object_id(project.id, (automation.get("config") or {}).get("data_scope"))
+    last_state = "unknown"
+    last_error: SmokeError | None = None
+    print("Waiting for Topics to generate a topic map...")
+
+    while True:
+        try:
+            cursor = api_post(
+                ctx,
+                "/brainstore/automation/get-object-cursors",
+                {"automation_id": automation_id, "project_id": project.id},
+            )
+            runtime = cursor.get("topic_runtime") or (cursor.get("stats") or {}).get("runtime") or {}
+            last_state = str(runtime.get("state") or "unknown")
+            active_versions = runtime.get("active_topic_map_versions") or {}
+            version = active_versions.get(topic_map_function_id)
+            start_xact_id = runtime.get("topic_classification_backfill_start_xact_id")
+            print(f"Topics runtime: {last_state}")
+            last_error = None
+            if version is not None and start_xact_id is not None:
+                return str(version), str(start_xact_id)
+
+            poke_topic_automation(ctx, automation_id, object_id)
+            execute_topic_automation(
+                ctx,
+                project.id,
+                automation,
+                timeout_seconds=args.automation_execution_timeout,
+            )
+        except SmokeError as exc:
+            last_error = exc
+
+        if time.monotonic() >= deadline:
+            error_note = f" Last execution/status error: {last_error}" if last_error else ""
+            raise SmokeError(
+                f"Timed out waiting for Topics to generate map {topic_map_function_id!r}. "
+                f"Last runtime state: {last_state}.{error_note}"
+            )
+        time.sleep(args.classification_interval)
 
 
 def get_topic_facet_status_counts(
@@ -802,7 +1158,7 @@ def get_topic_facet_status_counts(
     project_id: str,
     automation_id: str,
     facet: str,
-    function_keys: list[str] | None = None,
+    function_key: str | None = None,
 ) -> dict[str, int]:
     cursor = api_post(
         ctx,
@@ -810,28 +1166,18 @@ def get_topic_facet_status_counts(
         {"automation_id": automation_id, "project_id": project_id},
     )
     pending_min_executed_xact_id = cursor.get("pending_min_executed_xact_id")
-    keys = function_keys or [f"global:facet:{facet}"]
-    inflight_parts = []
-    error_parts = []
-    completed_parts = []
-    for function_key in keys:
-        base = f"_async_scoring_state.triggered_functions.{quote_btql_path_piece(function_key)}"
-        attempted = f"{base}.triggered_xact_id IS NOT NULL"
-        completed = f"{base}.completed_xact_id >= {base}.triggered_xact_id"
-        inflight = (
-            f"{attempted} AND ({base}.completed_xact_id IS NULL OR {base}.completed_xact_id < {base}.triggered_xact_id)"
-        )
-        if pending_min_executed_xact_id is None:
-            error_condition = f"{base}.attempts > 0"
-        else:
-            escaped_xact = escape_btql_literal(str(pending_min_executed_xact_id))
-            error_condition = f"{base}.attempts > 0 AND {base}.triggered_xact_id < '{escaped_xact}'"
-        inflight_parts.append(f"({inflight})")
-        error_parts.append(f"({inflight} AND {error_condition})")
-        completed_parts.append(f"({completed})")
-    inflight_any = " OR ".join(inflight_parts)
-    error_any = " OR ".join(error_parts)
-    completed_any = " OR ".join(completed_parts)
+    key = function_key or f"global:facet:{facet}"
+    base = f"_async_scoring_state.triggered_functions.{quote_btql_path_piece(key)}"
+    attempted = f"{base}.triggered_xact_id IS NOT NULL"
+    completed = f"{base}.completed_xact_id >= {base}.triggered_xact_id"
+    inflight = (
+        f"{attempted} AND ({base}.completed_xact_id IS NULL OR {base}.completed_xact_id < {base}.triggered_xact_id)"
+    )
+    if pending_min_executed_xact_id is None:
+        error_condition = f"{base}.attempts > 0"
+    else:
+        escaped_xact = escape_btql_literal(str(pending_min_executed_xact_id))
+        error_condition = f"{base}.attempts > 0 AND {base}.triggered_xact_id < '{escaped_xact}'"
     facet_path = f"facets.{quote_btql_path_piece(facet)}"
     matched = f"{facet_path} != 'NO_MATCH' AND {facet_path} != 'SKIPPED' AND {facet_path} != 'skipped'"
     query = (
@@ -839,9 +1185,9 @@ def get_topic_facet_status_counts(
         "measures: "
         f"count(({matched}) ? 1 : null) as matched, "
         f"count({facet_path}) as processed, "
-        f"count(({inflight_any}) ? 1 : null) as inflight, "
-        f"count(({error_any}) ? 1 : null) as errors, "
-        f"count(({completed_any}) ? 1 : null) as completed | "
+        f"count(({inflight}) ? 1 : null) as inflight, "
+        f"count(({inflight} AND {error_condition}) ? 1 : null) as errors, "
+        f"count(({completed}) ? 1 : null) as completed | "
         "filter: created >= NOW() - INTERVAL 3600 SECOND"
     )
     response = api_post(
@@ -884,36 +1230,38 @@ def saved_function_ref_key(function_ref: dict[str, Any]) -> str:
     return f"global:{function_type}:{name}"
 
 
-def facet_function_keys_for_running_check(
-    automation: dict[str, Any],
-    facets: list[str],
-) -> list[str]:
-    refs = (automation.get("config") or {}).get("facet_functions") or []
-    if len(refs) == len(facets):
-        return [saved_function_ref_key(ref) for ref in refs]
-    if len(facets) == 1:
-        return [f"global:facet:{facets[0]}"]
-    raise SmokeError("could not determine Topics facet function keys for running check")
+def facet_function_key(automation: dict[str, Any]) -> str:
+    return saved_function_ref_key(automation["config"]["facet_functions"][0])
 
 
 def validate_args(args: argparse.Namespace) -> None:
     if args.count < MIN_TOPIC_SUMMARIES and not args.allow_below_threshold:
         raise SmokeError(
-            f"--count must be at least {MIN_TOPIC_SUMMARIES} for Topics generation. "
-            "Use --allow-below-threshold only when intentionally testing pre-generation behavior."
+            f"topics.count must be at least {MIN_TOPIC_SUMMARIES} for Topics generation. "
+            "Use topics.allow_below_threshold only when intentionally testing pre-generation behavior."
         )
     if args.idle_seconds < 10:
-        raise SmokeError("--idle-seconds must be at least 10")
-    if getattr(args, "running_check_timeout", 0) < 0:
-        raise SmokeError("--running-check-timeout must be non-negative")
-    if getattr(args, "running_check_interval", 1) < 1:
-        raise SmokeError("--running-check-interval must be at least 1")
-    if getattr(args, "facet_preflight_timeout", 1) < 1:
-        raise SmokeError("--facet-preflight-timeout must be at least 1")
-    if getattr(args, "function_visibility_timeout", 0) < 0:
-        raise SmokeError("--function-visibility-timeout must be non-negative")
-    if getattr(args, "function_visibility_interval", 1) < 1:
-        raise SmokeError("--function-visibility-interval must be at least 1")
+        raise SmokeError("topics.idle_seconds must be at least 10")
+    if args.running_check_timeout < 0:
+        raise SmokeError("topics.running_check_timeout must be non-negative")
+    if args.running_check_interval < 1:
+        raise SmokeError("topics.running_check_interval must be at least 1")
+    if args.facet_preflight_timeout < 1:
+        raise SmokeError("topics.facet_preflight_timeout must be at least 1")
+    if args.function_visibility_timeout < 0:
+        raise SmokeError("topics.function_visibility_timeout must be non-negative")
+    if args.function_visibility_interval < 1:
+        raise SmokeError("topics.function_visibility_interval must be at least 1")
+    if args.compaction_timeout < 0:
+        raise SmokeError("topics.compaction_timeout must be non-negative")
+    if args.compaction_interval < 1:
+        raise SmokeError("topics.compaction_interval must be at least 1")
+    if args.automation_execution_timeout < 1:
+        raise SmokeError("topics.automation_execution_timeout must be at least 1")
+    if args.classification_timeout < 0:
+        raise SmokeError("topics.classification_timeout must be non-negative")
+    if args.classification_interval < 1:
+        raise SmokeError("topics.classification_interval must be at least 1")
 
 
 def timestamped_project_name(prefix: str, run_id: str | None = None) -> str:
@@ -1034,192 +1382,32 @@ def topic_automation_object_id(project_id: str, data_scope: Any | None) -> str:
     raise SmokeError(f"unsupported topic automation data scope: {scope_type}")
 
 
-def configured_defaults(smoketest: dict[str, Any]) -> dict[str, Any]:
-    """Convert smoke-test configuration into parser defaults."""
-    if not isinstance(smoketest, dict):
-        return {}
+def build_args(config: dict[str, Any]) -> argparse.Namespace:
+    from braintest_suite.config import TopicsConfig
 
-    defaults: dict[str, Any] = {}
-    direct_keys = [
-        "api_url",
-        "org",
-        "project_prefix",
-        "count",
-        "idle_seconds",
-        "timeout",
-        "allow_below_threshold",
-        "skip_facet_preflight",
-        "skip_running_check",
-        "facet_preflight_timeout",
-        "function_visibility_timeout",
-        "function_visibility_interval",
-        "running_check_timeout",
-        "running_check_interval",
-    ]
-    for key in direct_keys:
-        value = smoketest.get(key)
-        if value is not None:
-            defaults[key] = value
-
-    duration_keys = {
-        "topic_window": "topic_window_seconds",
-        "generation_cadence": "generation_cadence_seconds",
-    }
-    for config_key, parser_key in duration_keys.items():
-        value = smoketest.get(config_key)
-        if value is not None:
-            defaults[parser_key] = parse_duration_seconds(str(value))
-
-    return defaults
-
-
-def load_configured_defaults() -> dict[str, Any]:
-    """Load smoke-test CLI defaults from braintest.yaml when available."""
-    try:
-        from braintest_suite.config import load_config
-
-        config = load_config()
-    except Exception:
-        return {}
-
-    return configured_defaults(config.get("smoketest", {}))
-
-
-def build_parser(defaults: dict[str, Any] | None = None) -> argparse.ArgumentParser:
-    defaults = defaults or {}
-    parser = argparse.ArgumentParser(
-        description="Create a disposable Braintrust project for minimal Topics smoke testing."
+    values = TopicsConfig.model_validate(config.get("topics", {})).model_dump()
+    topic_window = values.pop("topic_window")
+    generation_cadence = values.pop("generation_cadence")
+    values.update(
+        api_key=None,
+        api_url=config.get("braintrust", {}).get("api_url"),
+        topic_window_seconds=parse_duration_seconds(topic_window),
+        generation_cadence_seconds=parse_duration_seconds(generation_cadence),
     )
-    subparsers = parser.add_subparsers(dest="command")
-
-    def add_common_auth_flags(p: argparse.ArgumentParser) -> None:
-        p.add_argument(
-            "--api-key",
-            default=defaults.get("api_key"),
-            help="Braintrust API key. Defaults to BRAINTRUST_API_KEY.",
-        )
-        p.add_argument(
-            "--org",
-            default=defaults.get("org"),
-            help="Braintrust org name. Defaults to BRAINTRUST_ORG_NAME.",
-        )
-        p.add_argument(
-            "--api-url",
-            default=defaults.get("api_url"),
-            help="Override discovered dataplane API URL. Defaults to BRAINTRUST_API_URL.",
-        )
-        p.add_argument(
-            "--timeout",
-            type=int,
-            default=defaults.get("timeout", DEFAULT_TIMEOUT_SECONDS),
-        )
-
-    create = subparsers.add_parser("create", help="Create a project, seed traces, and queue Topics.")
-    add_common_auth_flags(create)
-    add_create_flags(create, defaults)
-
-    status = subparsers.add_parser("status", help="Show minimal Topics automation status.")
-    add_common_auth_flags(status)
-    status.add_argument("--project", required=True, help="Project name created by this script.")
-
-    add_common_auth_flags(parser)
-    add_create_flags(parser, defaults)
-    return parser
-
-
-def add_create_flags(parser: argparse.ArgumentParser, defaults: dict[str, Any] | None = None) -> None:
-    defaults = defaults or {}
-    parser.add_argument(
-        "--project-prefix",
-        default=defaults.get("project_prefix", DEFAULT_PROJECT_PREFIX),
-    )
-    parser.add_argument("--count", type=int, default=defaults.get("count", DEFAULT_COUNT))
-    parser.add_argument("--idle-seconds", type=int, default=defaults.get("idle_seconds", 10))
-    parser.add_argument(
-        "--topic-window",
-        dest="topic_window_seconds",
-        type=parse_duration_seconds,
-        default=defaults.get("topic_window_seconds", parse_duration_seconds("1h")),
-    )
-    parser.add_argument(
-        "--generation-cadence",
-        dest="generation_cadence_seconds",
-        type=parse_duration_seconds,
-        default=defaults.get("generation_cadence_seconds", parse_duration_seconds("1h")),
-    )
-    parser.add_argument(
-        "--allow-below-threshold",
-        action="store_true",
-        default=defaults.get("allow_below_threshold", False),
-    )
-    parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument(
-        "--skip-facet-preflight",
-        action="store_true",
-        default=defaults.get("skip_facet_preflight", False),
-        help="Do not run direct and async-batch facet calls before queueing Topics.",
-    )
-    parser.add_argument(
-        "--facet-preflight-timeout",
-        type=int,
-        default=defaults.get("facet_preflight_timeout", DEFAULT_PREFLIGHT_TIMEOUT_SECONDS),
-        help="Seconds to allow for the one-trace direct facet preflight.",
-    )
-    parser.add_argument(
-        "--function-visibility-timeout",
-        type=int,
-        default=defaults.get(
-            "function_visibility_timeout",
-            DEFAULT_FUNCTION_VISIBILITY_TIMEOUT_SECONDS,
-        ),
-        help="Seconds to wait for saved functions to resolve through /function/use.",
-    )
-    parser.add_argument(
-        "--function-visibility-interval",
-        type=int,
-        default=defaults.get(
-            "function_visibility_interval",
-            DEFAULT_FUNCTION_VISIBILITY_INTERVAL_SECONDS,
-        ),
-        help="Seconds between saved-function /function/use visibility checks.",
-    )
-    parser.add_argument(
-        "--skip-running-check",
-        action="store_true",
-        default=defaults.get("skip_running_check", False),
-        help="Do not poll for the expected initial Topics running count after queueing.",
-    )
-    parser.add_argument(
-        "--running-check-timeout",
-        type=int,
-        default=defaults.get("running_check_timeout", DEFAULT_RUNNING_CHECK_TIMEOUT_SECONDS),
-        help="Seconds to wait for the expected Topics running count.",
-    )
-    parser.add_argument(
-        "--running-check-interval",
-        type=int,
-        default=defaults.get("running_check_interval", DEFAULT_RUNNING_CHECK_INTERVAL_SECONDS),
-        help="Seconds between Topics running-count checks.",
-    )
+    return argparse.Namespace(**values)
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = build_parser(load_configured_defaults())
-    args = parser.parse_args(argv)
-    command = args.command or "create"
-    try:
-        if command == "status":
-            return run_status(args)
-        return run_create(args)
-    except SmokeError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
+    from braintest_suite import cli
+
+    cli.main(args=["run", "topics", *(sys.argv[1:] if argv is None else argv)], prog_name="braintest")
+    return 0
 
 
 def run(config: dict[str, Any]) -> bool:
     """Run the Topics smoke test with values from the suite configuration."""
-    args = build_parser(configured_defaults(config.get("smoketest", {}))).parse_args([])
     try:
+        args = build_args(config)
         return run_create(args) == 0
     except SmokeError as exc:
         print(f"error: {exc}", file=sys.stderr)

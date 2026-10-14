@@ -15,10 +15,10 @@ AVAILABLE_SUITES = {
     "functional": "Functional API CRUD tests against Braintrust",
     "evaltest": "Evaluation test with synthetic dataset and scorers",
     "loadtest": "Locust-based load test with concurrent users",
-    "smoketest": "Topics pipeline test with a disposable project",
+    "topics": "Topics pipeline test with a disposable project",
 }
 
-DEFAULT_SUITES = ["functional", "evaltest", "loadtest"]
+DEFAULT_SUITES = list(AVAILABLE_SUITES)
 
 
 def _load_config() -> dict:
@@ -52,9 +52,9 @@ def _run_suite(name: str, config: dict) -> str:
         from braintest_suite.loadtest import run as run_fn
 
         return "SUCCESS" if run_fn(config) else "FAILED"
-    elif name == "smoketest":
+    elif name == "topics":
         click.echo("\n-----Running Topics Smoke Test-----")
-        from braintest_suite.smoke_test import run as run_fn
+        from braintest_suite.topics import run as run_fn
 
         return "SUCCESS" if run_fn(config) else "FAILED"
     else:
@@ -144,6 +144,25 @@ def run_suites(ctx, config_file, suites):
 
     has_failure = any(s == "FAILED" for s in results.values())
     sys.exit(1 if has_failure else 0)
+
+
+@cli.command("status")
+@click.argument("suite", type=click.Choice(["topics"]))
+@click.argument("project_name", required=True)
+@click.option("--config-file", default=None, help="Path to the YAML configuration file.")
+@click.pass_context
+def suite_status(ctx, suite, project_name, config_file):
+    """Show Topics automation status for an existing project."""
+    from braintest_suite.topics import run_module
+
+    os.environ["BRAINTEST_CONFIG_FILE"] = config_file or ctx.obj.get("config_file") or "braintest.yaml"
+    config = _load_config()
+    try:
+        args = run_module.build_args(config)
+        args.project = project_name
+        ctx.exit(run_module.run_status(args))
+    except run_module.SmokeError as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 @cli.command("list")

@@ -34,9 +34,9 @@ class EvalTestConfig(StrictBaseModel):
     dataset: DatasetConfig
 
 
-class SmokeTestConfig(StrictBaseModel):
+class TopicsConfig(StrictBaseModel):
+    dry_run: bool = False
     org: str | None = None
-    api_url: str | None = None
     project_prefix: str = "topics-smoke"
     count: int = 105
     idle_seconds: int = 10
@@ -49,8 +49,13 @@ class SmokeTestConfig(StrictBaseModel):
     facet_preflight_timeout: int = 30
     function_visibility_timeout: int = 60
     function_visibility_interval: int = 2
-    running_check_timeout: int = 90
-    running_check_interval: int = 3
+    compaction_timeout: int = 300
+    compaction_interval: int = 5
+    automation_execution_timeout: int = 30
+    running_check_timeout: int = 600
+    running_check_interval: int = 5
+    classification_timeout: int = 900
+    classification_interval: int = 5
 
 
 class WaitTimeConfig(StrictBaseModel):
@@ -104,7 +109,7 @@ class Settings(BaseSettings):
 
     braintrust: BraintrustConfig
     functionaltest: FunctionalTestConfig
-    smoketest: SmokeTestConfig = Field(default_factory=SmokeTestConfig)
+    topics: TopicsConfig = Field(default_factory=TopicsConfig)
     evaltest: EvalTestConfig
     loadtest: LoadTestConfig
 
